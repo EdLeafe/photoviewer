@@ -1,0 +1,12 @@
+Designate a folder for the images
+
+Bind keys for:
+    changing the image forward/back or random
+    quitting
+
+API
+    - load images from a website
+    - move current images to an inactive folder
+    - move inactive images to current folder
+    - delete images from either folder
+    - navigate among current images
