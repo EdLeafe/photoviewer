@@ -2,6 +2,14 @@
 
 import dabo
 
+def debugout(*args):
+    try:
+        dabo.dAppRef.DEBUG
+    except Exception:
+        return
+    out = ", ".join(["%s" % str(arg) for arg in args])
+    print out
+
 
 class FullImage(dabo.ui.dImage):
     def fill(self, evt=None):
@@ -13,6 +21,9 @@ class FullImage(dabo.ui.dImage):
         iW, iH = float(iW), float(iH)
         pProp = pW / pH
         iProp = iW / iH
+        debugout("Parent", pW, pH)
+        debugout("Image", iW, iH)
+        debugout("Prop", pProp, iProp)
 
         szW = pW
         szH = pW / iProp
