@@ -1,7 +1,6 @@
-Designate a folder for the images
-
 Bind keys for:
     changing the image forward/back or random
+    - forward done, using mouseclick
     quitting
 
 API

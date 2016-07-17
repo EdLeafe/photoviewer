@@ -30,6 +30,7 @@ class ImgForm(dabo.ui.dForm):
         mp.Sizer = sz = dabo.ui.dSizer("v")
         self.img = FullImage(mp, Picture=None)
         self.img.bindEvent(dabo.dEvents.MouseLeftClick, self.handle_click)
+        mp.bindEvent(dabo.dEvents.MouseLeftClick, self.handle_click)
         mp.bindEvent(dabo.dEvents.Resize, self.img.fill)
 
         self.current_images = []
@@ -68,12 +69,13 @@ class ImgForm(dabo.ui.dForm):
             return
         fname = self.current_images[self.image_index]
         self.img.Picture = fname
+        self.img.fill()
 
 
 
 if __name__ == "__main__":
     app = dApp()
-    app.DEBUG = True
+#    app.DEBUG = True
     app.MainFormClass = ImgForm
     app.start()
 
