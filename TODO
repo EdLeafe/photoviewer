@@ -1,10 +1,6 @@
-Designate a folder for the images
-
-Bind keys for:
-    changing the image forward/back or random
-    quitting
-
 API
+    - define a host website
+    - register a viewer with the host website
     - load images from a website
     - move current images to an inactive folder
     - move inactive images to current folder
