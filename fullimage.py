@@ -2,6 +2,14 @@
 
 import dabo
 
+def debugout(*args):
+    try:
+        dabo.dAppRef.DEBUG
+    except Exception:
+        return
+    out = ", ".join(["%s" % str(arg) for arg in args])
+    print out
+
 
 class FullImage(dabo.ui.dImage):
     def fill(self, evt=None):
@@ -9,10 +17,18 @@ class FullImage(dabo.ui.dImage):
         parent = self.Parent
         pW, pH = parent.Size
         pW, pH = float(pW), float(pH)
-        iW, iH = origW, origH = self.Size
+        img = self._Image
+        if not img:
+            # No image yet
+            return
+        iW, iH = origW, origH = img.GetWidth(), img.GetHeight()
         iW, iH = float(iW), float(iH)
         pProp = pW / pH
         iProp = iW / iH
+        debugout("FOrm", self.Form.Size)
+        debugout("Parent", pW, pH)
+        debugout("Image", iW, iH)
+        debugout("Prop", pProp, iProp)
 
         szW = pW
         szH = pW / iProp
