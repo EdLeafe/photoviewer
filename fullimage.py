@@ -1,4 +1,5 @@
 #/usr/bin/env python
+from __future__ import print_function
 
 import dabo
 
@@ -8,7 +9,7 @@ def debugout(*args):
     except Exception:
         return
     out = ", ".join(["%s" % str(arg) for arg in args])
-    print out
+    print(out)
 
 
 class FullImage(dabo.ui.dImage):
@@ -26,8 +27,8 @@ class FullImage(dabo.ui.dImage):
         pProp = pW / pH
         iProp = iW / iH
         debugout("FOrm", self.Form.Size)
-        debugout("Parent", pW, pH)
-        debugout("Image", iW, iH)
+        debugout("Parent", pW, pH, parent.Position)
+        debugout("Image", iW, iH, self.Position)
         debugout("Prop", pProp, iProp)
 
         szW = pW
@@ -59,5 +60,5 @@ class FullImage(dabo.ui.dImage):
         else:
             # Proportions match
             self.Position = (0, 0)
-        dabo.ui.callAfterInterval(150, self.Form.unlockDisplay)
+        self.Form.unlockDisplay()
 

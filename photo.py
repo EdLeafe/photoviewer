@@ -15,7 +15,8 @@ from fullimage import FullImage
 
 PHOTODIR = "images"
 INACTIVE_PHOTODIR = "inactive_images"
-IMG_PAT = re.compile(r".+\.jpg|jpeg|gif|png")
+IMG_PAT = re.compile(r".+\.[jpg|jpeg|gif|png]")
+CONFIG_FILE = "photo.cfg"
 
 
 class ImgForm(dabo.ui.dForm):
@@ -25,10 +26,11 @@ class ImgForm(dabo.ui.dForm):
         self._read_config()
 
     def afterInit(self):
-#        self.WindowState = "Fullscreen"
-        self.WindowState = "normal"
+        self.WindowState = "Fullscreen"
+#        self.WindowState = "normal"
         self.Size = (800, 600)
         self.BackColor = "black"
+        self.ShowSystemMenu = True
         self.mainPanel = mp = dabo.ui.dPanel(self, BackColor="black")
         self.Sizer.append1x(mp)
         mp.Sizer = sz = dabo.ui.dSizer("v")
@@ -40,12 +42,13 @@ class ImgForm(dabo.ui.dForm):
         self.inactive_images = []
         self.image_index = -1
         self.load_images()
+        dabo.ui.callAfter(self.navigate)
 
 
     def _read_config(self):
         cfg = ConfigParser.SafeConfigParser()
         try:
-            cfg.read(config_file)
+            cfg.read(CONFIG_FILE)
         except ConfigParser.MissingSectionHeaderError as e:
             # The file exists, but doesn't have the correct format.
             raise exc.InvalidConfigurationFile(e)
