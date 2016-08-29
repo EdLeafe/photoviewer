@@ -98,13 +98,15 @@ class ImgForm(dabo.ui.dForm):
                 with open(CONFIG_FILE, "w") as ff:
                     self.parser.write(ff)
             self._update_images(images)
+        else:
+            print("ERROR!", resp.status_code, resp.text)
+            exit()
 
 
     def _update_images(self, images):
         """Compares the associated images received from the server, and updates
         the local copies if needed.
         """
-        dabo.trace()
         curr = set([just_fname(img) for img in self.current_images])
         upd = set(images)
         if upd == curr:
