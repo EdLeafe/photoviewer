@@ -25,6 +25,12 @@ CONFIG_FILE = "photo.cfg"
 def just_fname(path):
     return os.path.split(path)[-1]
 
+def _normalize_interval(time_, units):
+    unit_key = units[0].lower()
+    factor = {"s": 1, "m": 60, "h": 3600, "d": 86400}.get(unit_key, 1)
+    # Need to convert to milliseconds
+    return time_ * factor * 1000
+
 
 class ImgForm(dabo.ui.dForm):
     def beforeInit(self):
@@ -35,8 +41,8 @@ class ImgForm(dabo.ui.dForm):
 
 
     def afterInit(self):
-        self.WindowState = "Fullscreen"
-#        self.WindowState = "normal"
+#        self.WindowState = "Fullscreen"
+        self.WindowState = "normal"
         self.Size = (800, 600)
         self.BackColor = "black"
         self.ShowSystemMenu = True
@@ -44,8 +50,8 @@ class ImgForm(dabo.ui.dForm):
         self.Sizer.append1x(mp)
         mp.Sizer = sz = dabo.ui.dSizer("v")
         self.img = FullImage(mp, Picture=None)
-        self.img.bindEvent(dabo.dEvents.MouseLeftClick, self.handle_click)
-        mp.bindEvent(dabo.dEvents.MouseLeftClick, self.handle_click)
+        self.img.bindEvent(dabo.dEvents.MouseLeftClick, self.handle_nav)
+        mp.bindEvent(dabo.dEvents.MouseLeftClick, self.handle_nav)
         mp.bindEvent(dabo.dEvents.Resize, self.img.fill)
 
         self.current_images = []
@@ -54,6 +60,13 @@ class ImgForm(dabo.ui.dForm):
         self.load_images()
         self._register()
         dabo.ui.callAfter(self.navigate)
+
+        self.picture_timer = dabo.ui.dTimer(mp, Interval=self.interval,
+                OnHit=self.handle_nav)
+        self.picture_timer.start()
+        self.check_timer = dabo.ui.dTimer(mp, Interval=self.check_interval,
+                OnHit=self.check_host)
+        self.check_timer.start()
 
 
     def _read_config(self):
@@ -77,17 +90,29 @@ class ImgForm(dabo.ui.dForm):
         if not self.dl_url:
             print("No download URL configured in photo.cfg; exiting")
             exit()
+        self.check_url = safe_get("host", "check_url", None)
+        self.frameset = safe_get("frameset", "name", "")
         self.name = safe_get("frame", "name", "undefined")
         self.pkid = safe_get("frame", "pkid", "")
         self.description = safe_get("frame", "description", "")
         self.orientation = safe_get("frame", "orientation", "H")
-        self.frameset = safe_get("frameset", "name", "")
+        # How often to change image
+        self.interval_time = int(safe_get("frame", "picture_interval", 10))
+        # Units of time for the image change interval
+        self.interval_units = safe_get("frame", "interval_units", "minutes")
+        self.interval = _normalize_interval(self.interval_time,
+                self.interval_units)
+        check_interval = int(safe_get("frame", "host_check", 120))
+        check_units = safe_get("frame", "host_check_units", "minutes")
+        self.check_interval = _normalize_interval(check_interval, check_units)
 
 
     def _register(self):
         headers = {"user-agent": "photoviewer"}
         data = {"pkid": self.pkid, "name": self.name,
                 "description": self.description,
+                "interval_time": self.interval_time,
+                "interval_units": self.interval_units,
                 "orientation": self.orientation,"frameset": self.frameset}
         resp = requests.post(self.reg_url, data=data, headers=headers)
         if 200 <= resp.status_code <= 299:
@@ -152,15 +177,16 @@ class ImgForm(dabo.ui.dForm):
                 if IMG_PAT.match(fname)]
         
 
-    def handle_click(self, evt):
-        """ Handles mouse clicks and their actions."""
+    def handle_nav(self, evt):
+        """Handles mouse clicks and timer events that rotate the displayed
+        image.
+        """
         self.navigate()
 
 
-    def navigate(self, forward=True):
-        """ Moves to another image. """
-        val = 1 if forward else -1
-        new_index = self.image_index + val
+    def navigate(self):
+        """Moves to the next image. """
+        new_index = self.image_index + 1
         # Boundaries
         max_index = len(self.current_images) - 1
         if new_index > max_index:
@@ -178,6 +204,49 @@ class ImgForm(dabo.ui.dForm):
         fname = self.current_images[self.image_index]
         self.img.Picture = fname
         self.img.fill()
+
+
+    def check_host(self, evt):
+        """Contact the host to update local status."""
+        if self.check_url is None:
+            # Not configured
+            print("No host check URL defined")
+            return
+        headers = {"user-agent": "photoviewer"}
+        url = self.check_url.replace("PKID", self.pkid)
+        resp = requests.get(url, headers=headers)
+        if resp.status_code != 200:
+            print(resp.status_code, resp.content)
+            return
+        data = resp.json()
+        # See if anything has updated on the server side
+        self._update_config(data)
+        # Check for image changes
+        self._update_images(data["images"])
+
+
+    def _update_config(self, data):
+        changed = False
+        new_interval = False
+        for key in ("name", "description", "interval_time", "interval_units"):
+            val = data.get(key, None)
+            if val is None:
+                continue
+            local_val = getattr(self, key)
+            if local_val != val:
+                setattr(self, key, val)
+                self.parser.set("frame", key, str(val))
+                changed = True
+                new_interval = new_interval or "interval" in key
+        if changed:
+            with open(CONFIG_FILE, "w") as ff:
+                self.parser.write(ff)
+        print("INTV", self.interval_time, self.interval_units)
+        if new_interval:
+            self.interval = _normalize_interval(self.interval_time,
+                    self.interval_units)
+            self.picture_timer.Interval = self.interval
+            self.picture_timer.start()
 
 
 if __name__ == "__main__":
