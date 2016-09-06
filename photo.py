@@ -1,7 +1,9 @@
 #/usr/bin/env python
 from __future__ import print_function
 
+import commands
 import glob
+import logging
 import json
 import os
 import re
@@ -16,14 +18,28 @@ from dabo.dApp import dApp
 
 from fullimage import FullImage
 
+LOG = logging.getLogger("photo")
+hnd = logging.FileHandler("log/photo.log")
+formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+hnd.setFormatter(formatter)
+LOG.addHandler(hnd) 
+LOG.setLevel(logging.INFO)
+
 PHOTODIR = "images"
 INACTIVE_PHOTODIR = "inactive_images"
 IMG_PAT = re.compile(r".+\.[jpg|jpeg|gif|png]")
 CONFIG_FILE = "photo.cfg"
 
 
+def logit(level, *msgs):
+    text = " ".join(["%s" % msg for msg in msgs])
+    log_method = getattr(LOG, level)
+    log_method(text)
+
+
 def just_fname(path):
     return os.path.split(path)[-1]
+
 
 def _normalize_interval(time_, units):
     unit_key = units[0].lower()
@@ -97,7 +113,7 @@ class ImgForm(dabo.ui.dForm):
         self.description = safe_get("frame", "description", "")
         self.orientation = safe_get("frame", "orientation", "H")
         # How often to change image
-        self.interval_time = int(safe_get("frame", "picture_interval", 10))
+        self.interval_time = int(safe_get("frame", "interval_time", 10))
         # Units of time for the image change interval
         self.interval_units = safe_get("frame", "interval_units", "minutes")
         self.interval = _normalize_interval(self.interval_time,
@@ -109,11 +125,14 @@ class ImgForm(dabo.ui.dForm):
 
     def _register(self):
         headers = {"user-agent": "photoviewer"}
+        # Get free disk space
+        freespace = commands.getoutput('df .').split('\n')[1].split()[3]
         data = {"pkid": self.pkid, "name": self.name,
                 "description": self.description,
                 "interval_time": self.interval_time,
                 "interval_units": self.interval_units,
-                "orientation": self.orientation,"frameset": self.frameset}
+                "orientation": self.orientation, "freespace": freespace,
+                "frameset": self.frameset}
         resp = requests.post(self.reg_url, data=data, headers=headers)
         if 200 <= resp.status_code <= 299:
             # Success!
@@ -137,28 +156,33 @@ class ImgForm(dabo.ui.dForm):
         if upd == curr:
             # No changes
             return
-        print("Please wait; updating images...")
+        print("Please wait; updating images...", end=" ")
         to_remove = curr - upd
         for img in to_remove:
+            logit("info", "removing", img)
             curr_loc = os.path.join(PHOTODIR, img)
             new_loc = os.path.join(INACTIVE_PHOTODIR, img)
             shutil.move(curr_loc, new_loc)
         to_get = upd - curr
         for img in to_get:
+            logit("info", "adding", img)
             # Check if it's local
             inactive_loc = os.path.join(INACTIVE_PHOTODIR, img)
             if os.path.exists(inactive_loc):
+                logit("info", "retrieving from inactive")
                 active_loc = os.path.join(PHOTODIR, img)
                 shutil.move(inactive_loc, active_loc)
                 continue
             # Not local, so download it
             self._download(img)
+        print("Done!")
 	self.load_images()
 
 
     def _download(self, img):
         headers = {"user-agent": "photoviewer"}
         url = "%s/%s" % (self.dl_url, img)
+        logit("info", "downloading", img, "from url", url)
         resp = requests.get(url, headers=headers, stream=True)
         if resp.status_code == 200:
             outfile = os.path.join(PHOTODIR, img)
@@ -241,15 +265,17 @@ class ImgForm(dabo.ui.dForm):
         if changed:
             with open(CONFIG_FILE, "w") as ff:
                 self.parser.write(ff)
-        print("INTV", self.interval_time, self.interval_units)
         if new_interval:
             self.interval = _normalize_interval(self.interval_time,
                     self.interval_units)
+            print("Setting timer to", self.interval)
             self.picture_timer.Interval = self.interval
             self.picture_timer.start()
 
 
 if __name__ == "__main__":
+    with open("photo.pid", "w") as ff:
+        ff.write("%s" % os.getpid())
     app = dApp()
 #    app.DEBUG = True
     app.MainFormClass = ImgForm
