@@ -8,30 +8,38 @@ import json
 import os
 import re
 import shutil
+import threading
 
 import requests
 import six.moves.configparser as ConfigParser
 
-import dabo
-dabo.ui.loadUI("wx")
-from dabo.dApp import dApp
+import spt
 
-from fullimage import FullImage
 
-LOG = logging.getLogger("photo")
-hnd = logging.FileHandler("log/photo.log")
-formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
-hnd.setFormatter(formatter)
-LOG.addHandler(hnd) 
-LOG.setLevel(logging.INFO)
-
+LOG = None
 PHOTODIR = "images"
 INACTIVE_PHOTODIR = "inactive_images"
+DISPLAY_PHOTODIR = "display"
 IMG_PAT = re.compile(r".+\.[jpg|jpeg|gif|png]")
 CONFIG_FILE = "photo.cfg"
+SHOW_CMD = "rm -f %s/*; cp %%s %s/display%%s" % (
+        DISPLAY_PHOTODIR, DISPLAY_PHOTODIR)
+ONE_GB = 1024 ** 3
+
+
+def _setup_logging():
+    global LOG
+    LOG = logging.getLogger("photo")
+    hnd = logging.FileHandler("log/photo.log")
+    formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+    hnd.setFormatter(formatter)
+    LOG.addHandler(hnd)
+    LOG.setLevel(logging.INFO)
 
 
 def logit(level, *msgs):
+    if not LOG:
+        _setup_logging()
     text = " ".join(["%s" % msg for msg in msgs])
     log_method = getattr(LOG, level)
     log_method(text)
@@ -44,45 +52,35 @@ def just_fname(path):
 def _normalize_interval(time_, units):
     unit_key = units[0].lower()
     factor = {"s": 1, "m": 60, "h": 3600, "d": 86400}.get(unit_key, 1)
-    # Need to convert to milliseconds
-    return time_ * factor * 1000
+    return time_ * factor
 
 
-class ImgForm(dabo.ui.dForm):
-    def beforeInit(self):
-        self.SaveRestorePosition = False
-        self.ShowStatusBar = False
+def get_freespace():
+    return commands.getoutput('df .').split('\n')[1].split()[3]
+
+
+class ImageManager(object):
+    def __init__(self):
+        self._timer = self.photo_timer = self.check_timer = None
+        self._nav_called = False
         self.parser = ConfigParser.SafeConfigParser()
         self._read_config()
-
-
-    def afterInit(self):
-#        self.WindowState = "Fullscreen"
-        self.WindowState = "normal"
-        self.Size = (800, 600)
-        self.BackColor = "black"
-        self.ShowSystemMenu = True
-        self.mainPanel = mp = dabo.ui.dPanel(self, BackColor="black")
-        self.Sizer.append1x(mp)
-        mp.Sizer = sz = dabo.ui.dSizer("v")
-        self.img = FullImage(mp, Picture=None)
-        self.img.bindEvent(dabo.dEvents.MouseLeftClick, self.handle_nav)
-        mp.bindEvent(dabo.dEvents.MouseLeftClick, self.handle_nav)
-        mp.bindEvent(dabo.dEvents.Resize, self.img.fill)
-
+        self._timer = spt.SPT()
+        self.check_timer = self._timer.add_timer("check", self.check_host,
+                self.check_interval, 0)
+        self.photo_timer = self._timer.add_timer("photo", self.navigate,
+                self.interval, 1)
         self.current_images = []
         self.inactive_images = []
         self.image_index = -1
+
         self.load_images()
         self._register()
-        dabo.ui.callAfter(self.navigate)
 
-        self.picture_timer = dabo.ui.dTimer(mp, Interval=self.interval,
-                OnHit=self.handle_nav)
-        self.picture_timer.start()
-        self.check_timer = dabo.ui.dTimer(mp, Interval=self.check_interval,
-                OnHit=self.check_host)
-        self.check_timer.start()
+
+    def start(self):
+        self._timer.start()
+        logit("info", "Timer started")
 
 
     def _read_config(self):
@@ -100,11 +98,11 @@ class ImgForm(dabo.ui.dForm):
 
         self.reg_url = safe_get("host", "reg_url")
         if not self.reg_url:
-            print("No registration URL configured in photo.cfg; exiting")
+            logit("error", "No registration URL in photo.cfg; exiting")
             exit()
         self.dl_url = safe_get("host", "dl_url")
         if not self.dl_url:
-            print("No download URL configured in photo.cfg; exiting")
+            logit("error", "No download URL configured in photo.cfg; exiting")
             exit()
         self.check_url = safe_get("host", "check_url", None)
         self.frameset = safe_get("frameset", "name", "")
@@ -118,15 +116,28 @@ class ImgForm(dabo.ui.dForm):
         self.interval_units = safe_get("frame", "interval_units", "minutes")
         self.interval = _normalize_interval(self.interval_time,
                 self.interval_units)
+        logit("info", "Setting image interval to", self.interval)
+        self.set_image_interval()
         check_interval = int(safe_get("frame", "host_check", 120))
         check_units = safe_get("frame", "host_check_units", "minutes")
         self.check_interval = _normalize_interval(check_interval, check_units)
 
 
+    def set_image_interval(self):
+        if not self._timer:
+            # Starting up
+            return
+        if self.photo_timer:
+            self._timer.cancel("photo")
+        self.photo_timer = self._timer.add_timer("photo", self.navigate,
+                self.interval, 1)
+        logit("info", "timer events", self._timer._events)
+
+
     def _register(self):
         headers = {"user-agent": "photoviewer"}
         # Get free disk space
-        freespace = commands.getoutput('df .').split('\n')[1].split()[3]
+        freespace = get_freespace()
         data = {"pkid": self.pkid, "name": self.name,
                 "description": self.description,
                 "interval_time": self.interval_time,
@@ -158,11 +169,17 @@ class ImgForm(dabo.ui.dForm):
             return
         print("Please wait; updating images...", end=" ")
         to_remove = curr - upd
+        freespace = get_freespace()
         for img in to_remove:
-            logit("info", "removing", img)
             curr_loc = os.path.join(PHOTODIR, img)
-            new_loc = os.path.join(INACTIVE_PHOTODIR, img)
-            shutil.move(curr_loc, new_loc)
+            if freespace < ONE_GB:
+                # Just delete it
+                logit("info", "deleting", curr_loc)
+                os.unlink(curr_loc)
+            else:
+                new_loc = os.path.join(INACTIVE_PHOTODIR, img)
+                logit("info", "inactivating", img)
+                shutil.move(curr_loc, new_loc)
         to_get = upd - curr
         for img in to_get:
             logit("info", "adding", img)
@@ -199,17 +216,14 @@ class ImgForm(dabo.ui.dForm):
         fnames = glob.glob("%s/*" % os.path.abspath(directory))
         self.current_images = [fname for fname in fnames
                 if IMG_PAT.match(fname)]
-        
-
-    def handle_nav(self, evt):
-        """Handles mouse clicks and timer events that rotate the displayed
-        image.
-        """
-        self.navigate()
 
 
     def navigate(self):
         """Moves to the next image. """
+        if not self._nav_called:
+            # Initial setting
+            self._nav_called = True
+            return
         new_index = self.image_index + 1
         # Boundaries
         max_index = len(self.current_images) - 1
@@ -226,15 +240,17 @@ class ImgForm(dabo.ui.dForm):
         if not self.current_images:
             return
         fname = self.current_images[self.image_index]
-        self.img.Picture = fname
-        self.img.fill()
+        fext = os.path.splitext(fname)[-1]
+        cmd = SHOW_CMD % (fname, fext)
+        logit("info", "Changing photo to", fname)
+        os.system(cmd)
 
 
-    def check_host(self, evt):
+    def check_host(self):
         """Contact the host to update local status."""
         if self.check_url is None:
             # Not configured
-            print("No host check URL defined")
+            logit("warning", "No host check URL defined")
             return
         headers = {"user-agent": "photoviewer"}
         url = self.check_url.replace("PKID", self.pkid)
@@ -268,16 +284,13 @@ class ImgForm(dabo.ui.dForm):
         if new_interval:
             self.interval = _normalize_interval(self.interval_time,
                     self.interval_units)
-            print("Setting timer to", self.interval)
-            self.picture_timer.Interval = self.interval
-            self.picture_timer.start()
+            logit("info", "Setting timer to", self.interval)
+            self.set_image_interval()
 
 
 if __name__ == "__main__":
     with open("photo.pid", "w") as ff:
         ff.write("%s" % os.getpid())
-    app = dApp()
-#    app.DEBUG = True
-    app.MainFormClass = ImgForm
-    app.start()
-
+    img_mgr = ImageManager()
+    img_mgr.start()
+    logit("info", "And we're off!")
