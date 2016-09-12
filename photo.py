@@ -8,15 +8,14 @@ import json
 import os
 import re
 import shutil
-import threading
+from threading import Timer
 
 import requests
 import six.moves.configparser as ConfigParser
 
-import spt
-
 
 LOG = None
+LOG_LEVEL = logging.INFO
 PHOTODIR = "images"
 INACTIVE_PHOTODIR = "inactive_images"
 DISPLAY_PHOTODIR = "display"
@@ -34,7 +33,7 @@ def _setup_logging():
     formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
     hnd.setFormatter(formatter)
     LOG.addHandler(hnd)
-    LOG.setLevel(logging.INFO)
+    LOG.setLevel(LOG_LEVEL)
 
 
 def logit(level, *msgs):
@@ -61,26 +60,37 @@ def get_freespace():
 
 class ImageManager(object):
     def __init__(self):
-        self._timer = self.photo_timer = self.check_timer = None
-        self._nav_called = False
+        _setup_logging()
+        self.photo_timer = self.check_timer = None
         self.parser = ConfigParser.SafeConfigParser()
         self._read_config()
-        self._timer = spt.SPT()
-        self.check_timer = self._timer.add_timer("check", self.check_host,
-                self.check_interval, 0)
-        self.photo_timer = self._timer.add_timer("photo", self.navigate,
-                self.interval, 1)
+        self.set_timer("check")
+        self.set_timer("photo")
+
         self.current_images = []
         self.inactive_images = []
         self.image_index = -1
-
         self.load_images()
         self._register()
 
 
+    def set_timer(self, typ, start=False):
+        tmr = None
+        if typ == "photo":
+            tmr = self.photo_timer = Timer(self.interval, self.navigate)
+        elif typ == "check":
+            tmr = self.check_timer = Timer(self.check_interval,
+                    self.check_host)
+        logit("debug", "Timer set for:", typ, tmr.interval, tmr.function)
+        if tmr and start:
+            tmr.start()
+            logit("debug", "Timer started for", typ)
+
+
     def start(self):
-        self._timer.start()
-        logit("info", "Timer started")
+        self.check_timer.start()
+        self.photo_timer.start()
+        logit("debug", "Timers started")
 
 
     def _read_config(self):
@@ -95,6 +105,9 @@ class ImageManager(object):
                 return self.parser.get(section, option)
             except (ConfigParser.NoSectionError, ConfigParser.NoOptionError):
                 return default
+
+        self.log_level = safe_get("frame", "log_level", "INFO")
+        LOG.setLevel(getattr(logging, self.log_level))
 
         self.reg_url = safe_get("host", "reg_url")
         if not self.reg_url:
@@ -124,14 +137,11 @@ class ImageManager(object):
 
 
     def set_image_interval(self):
-        if not self._timer:
+        if not self.photo_timer:
             # Starting up
             return
-        if self.photo_timer:
-            self._timer.cancel("photo")
-        self.photo_timer = self._timer.add_timer("photo", self.navigate,
-                self.interval, 1)
-        logit("info", "timer events", self._timer._events)
+        self.photo_timer.cancel()
+        self.set_timer("photo", True)
 
 
     def _register(self):
@@ -199,7 +209,7 @@ class ImageManager(object):
     def _download(self, img):
         headers = {"user-agent": "photoviewer"}
         url = "%s/%s" % (self.dl_url, img)
-        logit("info", "downloading", img, "from url", url)
+        logit("info", "downloading", img)
         resp = requests.get(url, headers=headers, stream=True)
         if resp.status_code == 200:
             outfile = os.path.join(PHOTODIR, img)
@@ -220,10 +230,7 @@ class ImageManager(object):
 
     def navigate(self):
         """Moves to the next image. """
-        if not self._nav_called:
-            # Initial setting
-            self._nav_called = True
-            return
+        logit("debug", "navigate called")
         new_index = self.image_index + 1
         # Boundaries
         max_index = len(self.current_images) - 1
@@ -234,6 +241,7 @@ class ImageManager(object):
         if new_index != self.image_index:
             self.image_index = new_index
             self.show_photo()
+        self.set_timer("photo", True)
 
 
     def show_photo(self):
@@ -248,6 +256,7 @@ class ImageManager(object):
 
     def check_host(self):
         """Contact the host to update local status."""
+        logit("debug", "check_host called")
         if self.check_url is None:
             # Not configured
             logit("warning", "No host check URL defined")
@@ -263,6 +272,7 @@ class ImageManager(object):
         self._update_config(data)
         # Check for image changes
         self._update_images(data["images"])
+        self.set_timer("check", True)
 
 
     def _update_config(self, data):
@@ -288,9 +298,20 @@ class ImageManager(object):
             self.set_image_interval()
 
 
+    def kill_all(self):
+        """Kills all timers on receiving a Ctrl-C."""
+        logit("error", "Killing timers")
+        self.photo_timer.cancel()
+        self.check_timer.cancel()
+        logit("error", "Timers canceled")
+
+
 if __name__ == "__main__":
     with open("photo.pid", "w") as ff:
         ff.write("%s" % os.getpid())
     img_mgr = ImageManager()
-    img_mgr.start()
-    logit("info", "And we're off!")
+    try:
+        img_mgr.start()
+        logit("debug", "And we're off!")
+    except KeyboardInterrupt:
+        img_mgr.kill_all()

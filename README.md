@@ -1,2 +1,2 @@
 # photoviewer
-Simple Dabo-base photo viewer app
+Simple gThumb-base photo viewer app
