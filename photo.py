@@ -2,6 +2,7 @@
 from __future__ import print_function
 
 import commands
+import filecmp
 import glob
 import logging
 import json
@@ -68,8 +69,10 @@ class ImageManager(object):
         self.set_timer("photo")
 
         self.current_images = []
+        self.host_images = []
         self.inactive_images = []
-        self.image_index = -1
+        self.displayed_name = ""
+        self.image_index = 0
         self.load_images()
         self._register()
 
@@ -162,24 +165,29 @@ class ImageManager(object):
                 self.parser.set("frame", "pkid", pkid)
                 with open(CONFIG_FILE, "w") as ff:
                     self.parser.write(ff)
-            self._update_images(images)
+            self.host_images = images
+            self._update_images()
         else:
             print("ERROR!", resp.status_code, resp.text)
             exit()
 
 
-    def _update_images(self, images):
+    def _update_images(self):
         """Compares the associated images received from the server, and updates
         the local copies if needed.
         """
+        images = self.host_images
         curr = set([just_fname(img) for img in self.current_images])
         upd = set(images)
         if upd == curr:
+            logit("debug", "No changes in _update_images")
             # No changes
             return
         print("Please wait; updating images...", end=" ")
         to_remove = curr - upd
+        logit("debug", "To remove:", *to_remove)
         freespace = get_freespace()
+        logit("debug", "Freespace", freespace)
         for img in to_remove:
             curr_loc = os.path.join(PHOTODIR, img)
             if freespace < ONE_GB:
@@ -191,6 +199,7 @@ class ImageManager(object):
                 logit("info", "inactivating", img)
                 shutil.move(curr_loc, new_loc)
         to_get = upd - curr
+        logit("debug", "To get:", *to_get)
         for img in to_get:
             logit("info", "adding", img)
             # Check if it's local
@@ -204,6 +213,7 @@ class ImageManager(object):
             self._download(img)
         print("Done!")
 	self.load_images()
+        self.show_photo()
 
 
     def _download(self, img):
@@ -231,6 +241,7 @@ class ImageManager(object):
     def navigate(self):
         """Moves to the next image. """
         logit("debug", "navigate called")
+        logit("debug", "current index", self.image_index)
         new_index = self.image_index + 1
         # Boundaries
         max_index = len(self.current_images) - 1
@@ -238,19 +249,53 @@ class ImageManager(object):
             new_index = 0
         else:
             new_index = max(0, min(max_index, new_index))
-        if new_index != self.image_index:
+        logit("debug", "new index", new_index)
+        curr_display_list = os.listdir(DISPLAY_PHOTODIR)
+        logit("debug", "curr display list:", *curr_display_list)
+        if not curr_display_list or new_index != self.image_index:
             self.image_index = new_index
             self.show_photo()
+        elif new_index == 0:
+            # There is only one image to display; make sure that it is the same
+            # as the one currently displayed.
+            # First, handle case where current image has been deleted locally
+            img_exists = os.path.exists(self.displayed_name)
+            logit("debug", "image exists:", img_exists)
+            if not img_exists:
+                self.current_images.remove(self.displayed_name)
+                logit("debug", "refreshing missing images")
+                self._update_images()
+            displayed_file = "%s/%s" % (DISPLAY_PHOTODIR, curr_display_list[0])
+            logit("debug", "comparing:", self.displayed_name, displayed_file)
+            same_files = filecmp.cmp(self.displayed_name, displayed_file)
+            logit("debug", "Files are", "same" if same_files else "different")
+            if not same_files:
+                self.show_photo()
         self.set_timer("photo", True)
 
 
     def show_photo(self):
         if not self.current_images:
             return
-        fname = self.current_images[self.image_index]
+        try:
+            fname = self.current_images[self.image_index]
+        except IndexError as e:
+            logit("error", "BAD INDEX", e)
+            if self.current_images:
+                fname = self.current_images[-1]
+            else:
+                # Something's screwy
+                logit("error", "No images!")
+                self.load_images()
+                return
         fext = os.path.splitext(fname)[-1]
+        # Since the displayed image name is always 'display.EXT', keep the true
+        # name for comparison later.
+        self.displayed_name = fname
+        logit("debug", "displayed image name:", self.displayed_name)
         cmd = SHOW_CMD % (fname, fext)
-        logit("info", "Changing photo to", fname)
+        logit("info", "Changing photo to", just_fname(fname))
+        logit("debug", "Command:", cmd)
         os.system(cmd)
 
 
@@ -263,15 +308,21 @@ class ImageManager(object):
             return
         headers = {"user-agent": "photoviewer"}
         url = self.check_url.replace("PKID", self.pkid)
-        resp = requests.get(url, headers=headers)
-        if resp.status_code != 200:
-            print(resp.status_code, resp.content)
+        try:
+            resp = requests.get(url, headers=headers)
+            if resp.status_code != 200:
+                print(resp.status_code, resp.content)
+                logit("error", resp.status_code, resp.content)
+                return
+        except Exception as e:
+            logit("error", "check_host", e)
             return
         data = resp.json()
         # See if anything has updated on the server side
         self._update_config(data)
         # Check for image changes
-        self._update_images(data["images"])
+        self.host_images = data["images"]
+        self._update_images()
         self.set_timer("check", True)
 
 
