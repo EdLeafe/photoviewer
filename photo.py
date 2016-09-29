@@ -2,6 +2,7 @@
 from __future__ import print_function
 
 import commands
+import datetime
 import filecmp
 import glob
 import logging
@@ -65,6 +66,7 @@ class ImageManager(object):
         self.photo_timer = self.check_timer = None
         self.parser = ConfigParser.SafeConfigParser()
         self._read_config()
+        self.initial_interval = self._set_start()
         self.set_timer("check")
         self.set_timer("photo")
 
@@ -77,10 +79,26 @@ class ImageManager(object):
         self._register()
 
 
+    def _set_start(self):
+        now = datetime.datetime.now()
+        base_hour, base_minute = self.interval_base.split(":")
+        start_hour = now.hour if base_hour == "*" else int(base_hour)
+        start_minute = now.minute if base_minute == "*" else int(base_minute)
+        start_hour = (start_hour if start_minute >= now.minute
+                else start_hour + 1)
+        start_day = now.day if start_hour >= now.hour else now.day + 1
+        start = now.replace(day=start_day, hour=start_hour,
+                minute=start_minute, second=0, microsecond=0)
+        offset = start - now
+        return offset.total_seconds()
+
+
     def set_timer(self, typ, start=False):
         tmr = None
         if typ == "photo":
-            tmr = self.photo_timer = Timer(self.interval, self.navigate)
+            interval = self.initial_interval or self.interval
+            self.initial_interval = 0
+            tmr = self.photo_timer = Timer(interval, self.navigate)
         elif typ == "check":
             tmr = self.check_timer = Timer(self.check_interval,
                     self.check_host)
@@ -126,6 +144,8 @@ class ImageManager(object):
         self.pkid = safe_get("frame", "pkid", "")
         self.description = safe_get("frame", "description", "")
         self.orientation = safe_get("frame", "orientation", "H")
+        # When to start the image rotation
+        self.interval_base = safe_get("frame", "interval_base", "*:*")
         # How often to change image
         self.interval_time = int(safe_get("frame", "interval_time", 10))
         # Units of time for the image change interval
