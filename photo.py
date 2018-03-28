@@ -1,7 +1,6 @@
-#/usr/bin/env python
+#/usr/bin/env python3
 from __future__ import print_function
 
-import commands
 import datetime
 import filecmp
 import glob
@@ -10,9 +9,11 @@ import json
 import os
 import re
 import shutil
+from subprocess import Popen, PIPE
 from threading import Timer
 
 import requests
+import six
 import six.moves.configparser as ConfigParser
 
 
@@ -23,9 +24,20 @@ INACTIVE_PHOTODIR = "inactive_images"
 DISPLAY_PHOTODIR = "display"
 IMG_PAT = re.compile(r".+\.[jpg|jpeg|gif|png]")
 CONFIG_FILE = "photo.cfg"
-SHOW_CMD = "rm -f %s/*; cp %%s %s/display%%s" % (
+SHOW_CMD = "rm -f %s/display.*; cp %%s %s/display%%s" % (
         DISPLAY_PHOTODIR, DISPLAY_PHOTODIR)
 ONE_GB = 1024 ** 3
+
+
+def runproc(cmd, wait=True):
+    if wait:
+        kwargs = dict(stdin=PIPE, stdout=PIPE, stderr=PIPE)
+    else:
+        kwargs = dict(stdin=None, stdout=None, stderr=None)
+    proc = Popen([cmd], shell=True, close_fds=True, **kwargs)
+    if wait:
+        stdout_text, stderr_text = proc.communicate()
+        return stdout_text.decode("utf-8"), stderr_text.decode("utf-8")
 
 
 def _setup_logging():
@@ -57,7 +69,10 @@ def _normalize_interval(time_, units):
 
 
 def get_freespace():
-    return commands.getoutput('df .').split('\n')[1].split()[3]
+    out, err = runproc("df .")
+    ret = out.split('\n')[1].split()[3]
+    ret = int(ret)
+    return ret
 
 
 class ImageManager(object):
@@ -67,6 +82,7 @@ class ImageManager(object):
         self.parser = ConfigParser.SafeConfigParser()
         self._read_config()
         self.initial_interval = self._set_start()
+        self.in_check_host = False
         self.set_timer("check")
         self.set_timer("photo")
 
@@ -77,13 +93,27 @@ class ImageManager(object):
         self.image_index = 0
         self.load_images()
         self._register()
+        self.start()
 
 
     def _set_start(self):
         now = datetime.datetime.now()
         base_hour, base_minute = self.interval_base.split(":")
         start_hour = now.hour if base_hour == "*" else int(base_hour)
-        start_minute = now.minute if base_minute == "*" else int(base_minute)
+        if base_minute == "*":
+            start_minute = now.minute
+        else:
+            if start_hour == now.hour:
+                # We want to make up the offset from the current time and the
+                # start hour. First, determine how many minutes until we hit
+                # the start_minute.
+                diff = int(base_minute) - now.minute
+                if diff < 0:
+                    diff += 60
+                interval_minutes = int(self.interval / 60)
+                start_minute = now.minute + (diff % interval_minutes)
+            else:
+                start_minute = base_minute
         start_hour = (start_hour if start_minute >= now.minute
                 else start_hour + 1)
         start_day = now.day if start_hour >= now.hour else now.day + 1
@@ -98,6 +128,7 @@ class ImageManager(object):
         if typ == "photo":
             interval = self.initial_interval or self.interval
             self.initial_interval = 0
+
             tmr = self.photo_timer = Timer(interval, self.navigate)
         elif typ == "check":
             tmr = self.check_timer = Timer(self.check_interval,
@@ -157,6 +188,7 @@ class ImageManager(object):
         check_interval = int(safe_get("frame", "host_check", 120))
         check_units = safe_get("frame", "host_check_units", "minutes")
         self.check_interval = _normalize_interval(check_interval, check_units)
+        logit("info", "Setting host check interval to", self.check_interval)
 
 
     def set_image_interval(self):
@@ -188,7 +220,7 @@ class ImageManager(object):
             self.host_images = images
             self._update_images()
         else:
-            print("ERROR!", resp.status_code, resp.text)
+            logit("error", resp.status_code, resp.text)
             exit()
 
 
@@ -203,7 +235,7 @@ class ImageManager(object):
             logit("debug", "No changes in _update_images")
             # No changes
             return
-        print("Please wait; updating images...", end=" ")
+        logit("debug", "updating images...")
         to_remove = curr - upd
         logit("debug", "To remove:", *to_remove)
         freespace = get_freespace()
@@ -231,14 +263,15 @@ class ImageManager(object):
                 continue
             # Not local, so download it
             self._download(img)
-        print("Done!")
-	self.load_images()
+        logit("debug", "Image update is done!")
+        self.load_images()
         self.show_photo()
 
 
     def _download(self, img):
         headers = {"user-agent": "photoviewer"}
         url = "%s/%s" % (self.dl_url, img)
+        logit("debug", url)
         logit("info", "downloading", img)
         resp = requests.get(url, headers=headers, stream=True)
         if resp.status_code == 200:
@@ -262,6 +295,7 @@ class ImageManager(object):
         """Moves to the next image. """
         logit("debug", "navigate called")
         logit("debug", "current index", self.image_index)
+
         new_index = self.image_index + 1
         # Boundaries
         max_index = len(self.current_images) - 1
@@ -270,7 +304,8 @@ class ImageManager(object):
         else:
             new_index = max(0, min(max_index, new_index))
         logit("debug", "new index", new_index)
-        curr_display_list = os.listdir(DISPLAY_PHOTODIR)
+        curr_display_list = [f for f in os.listdir(DISPLAY_PHOTODIR)
+                if not f.startswith(".")]
         logit("debug", "curr display list:", *curr_display_list)
         if not curr_display_list or new_index != self.image_index:
             self.image_index = new_index
@@ -326,24 +361,34 @@ class ImageManager(object):
             # Not configured
             logit("warning", "No host check URL defined")
             return
+        # If we are already in check_host, skip
+        if self.in_check_host:
+            logit("debug", "check_host called; already in the process")
+            return
+        self.in_check_host = True
         headers = {"user-agent": "photoviewer"}
         url = self.check_url.replace("PKID", self.pkid)
         try:
             resp = requests.get(url, headers=headers)
-            if resp.status_code != 200:
-                print(resp.status_code, resp.content)
+            if resp.status_code >= 300:
                 logit("error", resp.status_code, resp.content)
+                self.in_check_host = False
                 return
         except Exception as e:
             logit("error", "check_host", e)
+            self.in_check_host = False
             return
         data = resp.json()
+        logit("debug", "Data:", data)
         # See if anything has updated on the server side
         self._update_config(data)
         # Check for image changes
         self.host_images = data["images"]
+        logit("debug", "Updating images")
         self._update_images()
+        logit("debug", "check_host done.")
         self.set_timer("check", True)
+        self.in_check_host = False
 
 
     def _update_config(self, data):

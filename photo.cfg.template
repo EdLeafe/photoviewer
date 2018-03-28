@@ -13,7 +13,7 @@ interval_units = hours
 host_check = 10
 host_check_units = minutes
 log_level = INFO
-pkid = 
+pkid = 00000000-0000-0000-0000-000000000000
 
 [frameset]
 name = 
