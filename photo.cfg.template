@@ -1,7 +1,7 @@
 [host]
-reg_url = http://photo.leafe.com/register
-dl_url = http://photo.leafe.com/download
-check_url = http://photo.leafe.com/frame/PKID/status
+reg_url = https://photo.leafe.com/register
+dl_url = https://photo.leafe.com/download
+check_url = https://photo.leafe.com/frame/PKID/status
 
 [frame]
 name = *NAME*
