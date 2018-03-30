@@ -7,6 +7,7 @@ import glob
 import logging
 import json
 import os
+import random
 import re
 import shutil
 from subprocess import Popen, PIPE
@@ -26,7 +27,7 @@ IMG_PAT = re.compile(r".+\.[jpg|jpeg|gif|png]")
 CONFIG_FILE = "photo.cfg"
 SHOW_CMD = "rm -f %s/display.*; cp %%s %s/display%%s" % (
         DISPLAY_PHOTODIR, DISPLAY_PHOTODIR)
-VIEWER_CMD = "sudo fbi -a --noverbose --cachemem 0 -T 1 -t 60 %s"
+VIEWER_CMD = "sudo fbi -a --noverbose -T 1 %s"
 ONE_MB = 1024 ** 2
 ONE_GB = 1024 ** 3
 
@@ -301,6 +302,7 @@ class ImageManager(object):
         fnames = glob.glob("%s/*" % os.path.abspath(directory))
         self.current_images = [fname for fname in fnames
                 if IMG_PAT.match(fname)]
+        random.shuffle(self.current_images)
 
 
     def navigate(self):
@@ -359,8 +361,8 @@ class ImageManager(object):
         cmd = VIEWER_CMD % fname
         logit("info", "Changing photo to", just_fname(fname))
         logit("debug", "Command:", cmd)
+        runproc("sudo killall fbi")
         runproc(cmd, wait=False)
-        runproc("sleep 20; sudo killall fbi")
 
 
     def check_host(self):
