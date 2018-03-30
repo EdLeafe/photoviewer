@@ -26,6 +26,7 @@ IMG_PAT = re.compile(r".+\.[jpg|jpeg|gif|png]")
 CONFIG_FILE = "photo.cfg"
 SHOW_CMD = "rm -f %s/display.*; cp %%s %s/display%%s" % (
         DISPLAY_PHOTODIR, DISPLAY_PHOTODIR)
+VIEWER_CMD = "sudo fbi -a --noverbose --cachemem 0 -T 1 -t 60 %s"
 ONE_GB = 1024 ** 3
 
 
@@ -143,6 +144,7 @@ class ImageManager(object):
         self.check_timer.start()
         self.photo_timer.start()
         logit("debug", "Timers started")
+        self.show_photo()
 
 
     def _read_config(self):
@@ -304,10 +306,7 @@ class ImageManager(object):
         else:
             new_index = max(0, min(max_index, new_index))
         logit("debug", "new index", new_index)
-        curr_display_list = [f for f in os.listdir(DISPLAY_PHOTODIR)
-                if not f.startswith(".")]
-        logit("debug", "curr display list:", *curr_display_list)
-        if not curr_display_list or new_index != self.image_index:
+        if new_index != self.image_index:
             self.image_index = new_index
             self.show_photo()
         elif new_index == 0:
@@ -344,14 +343,14 @@ class ImageManager(object):
                 self.load_images()
                 return
         fext = os.path.splitext(fname)[-1]
-        # Since the displayed image name is always 'display.EXT', keep the true
-        # name for comparison later.
+
         self.displayed_name = fname
         logit("debug", "displayed image name:", self.displayed_name)
-        cmd = SHOW_CMD % (fname, fext)
+        cmd = VIEWER_CMD % fname
         logit("info", "Changing photo to", just_fname(fname))
         logit("debug", "Command:", cmd)
-        os.system(cmd)
+        runproc(cmd, wait=False)
+        runproc("sleep 20; sudo killall fbi")
 
 
     def check_host(self):
