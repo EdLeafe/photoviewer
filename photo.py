@@ -27,6 +27,7 @@ CONFIG_FILE = "photo.cfg"
 SHOW_CMD = "rm -f %s/display.*; cp %%s %s/display%%s" % (
         DISPLAY_PHOTODIR, DISPLAY_PHOTODIR)
 VIEWER_CMD = "sudo fbi -a --noverbose --cachemem 0 -T 1 -t 60 %s"
+ONE_MB = 1024 ** 2
 ONE_GB = 1024 ** 3
 
 
@@ -70,9 +71,12 @@ def _normalize_interval(time_, units):
 
 
 def get_freespace():
-    out, err = runproc("df .")
+    out, err = runproc("df -BM .")
     ret = out.split('\n')[1].split()[3]
-    ret = int(ret)
+    # Remove the trailing 'M'
+    ret = ret.replace("M", "")
+    ret = int(ret) * ONE_MB
+    logit("debug", "Free disk space =", ret)
     return ret
 
 
@@ -118,6 +122,12 @@ class ImageManager(object):
         start_hour = (start_hour if start_minute >= now.minute
                 else start_hour + 1)
         start_day = now.day if start_hour >= now.hour else now.day + 1
+        if start_minute >= 60:
+            start_minute = start_minute % 60
+            start_hour += 1
+        if start_hour >= 24:
+            start_hour = start_hour % 24
+            start_day += 1
         start = now.replace(day=start_day, hour=start_hour,
                 minute=start_minute, second=0, microsecond=0)
         offset = start - now
