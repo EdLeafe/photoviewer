@@ -10,6 +10,7 @@ import os
 import random
 import re
 import shutil
+import signal
 from subprocess import Popen, PIPE
 from threading import Timer
 
@@ -27,7 +28,7 @@ IMG_PAT = re.compile(r".+\.[jpg|jpeg|gif|png]")
 CONFIG_FILE = "photo.cfg"
 SHOW_CMD = "rm -f %s/display.*; cp %%s %s/display%%s" % (
         DISPLAY_PHOTODIR, DISPLAY_PHOTODIR)
-VIEWER_CMD = "sudo fbi -a --noverbose -T 1 %s"
+VIEWER_CMD = "sudo fbi -a --noverbose -T 1 %s >/dev/null 2>&1"
 ONE_MB = 1024 ** 2
 ONE_GB = 1024 ** 3
 
@@ -152,13 +153,16 @@ class ImageManager(object):
 
 
     def start(self):
+        signal.signal(signal.SIGHUP, self._read_config)
+        signal.signal(signal.SIGINT, self.check_host)
         self.check_timer.start()
         self.photo_timer.start()
         logit("debug", "Timers started")
         self.show_photo()
 
 
-    def _read_config(self):
+    def _read_config(self, signum=None, frame=None):
+        logit("info", "_read_config called!")
         try:
             self.parser.read(CONFIG_FILE)
         except ConfigParser.MissingSectionHeaderError as e:
@@ -365,7 +369,7 @@ class ImageManager(object):
         runproc(cmd, wait=False)
 
 
-    def check_host(self):
+    def check_host(self, signum=None, frame=None):
         """Contact the host to update local status."""
         logit("debug", "check_host called")
         if self.check_url is None:
@@ -407,6 +411,7 @@ class ImageManager(object):
         new_interval = False
         for key in ("name", "description", "interval_time", "interval_units"):
             val = data.get(key, None)
+            logit("debug", "key:", key, "; val:", val)
             if val is None:
                 continue
             local_val = getattr(self, key)
