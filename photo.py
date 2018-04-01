@@ -141,7 +141,6 @@ class ImageManager(object):
         if typ == "photo":
             interval = self.initial_interval or self.interval
             self.initial_interval = 0
-
             tmr = self.photo_timer = Timer(interval, self.navigate)
         elif typ == "check":
             tmr = self.check_timer = Timer(self.check_interval,
@@ -155,10 +154,23 @@ class ImageManager(object):
     def start(self):
         signal.signal(signal.SIGHUP, self._read_config)
         signal.signal(signal.SIGINT, self.check_host)
+        signal.signal(signal.SIGTSTP, self.pause)
+        signal.signal(signal.SIGCONT, self.resume)
+        signal.signal(signal.SIGTRAP, self.navigate)
         self.check_timer.start()
         self.photo_timer.start()
         logit("debug", "Timers started")
         self.show_photo()
+
+
+    def pause(self, signum=None, frame=None):
+        self.photo_timer.cancel()
+        logit("info", "Photo timer stopped")
+
+
+    def resume(self, signum=None, frame=None):
+        self.set_timer("photo", True)
+        logit("info", "Photo timer started")
 
 
     def _read_config(self, signum=None, frame=None):
@@ -309,10 +321,9 @@ class ImageManager(object):
         random.shuffle(self.current_images)
 
 
-    def navigate(self):
+    def navigate(self, signum=None, frame=None):
         """Moves to the next image. """
-        logit("debug", "navigate called")
-        logit("debug", "current index", self.image_index)
+        logit("debug", "navigate called; current index", self.image_index)
 
         new_index = self.image_index + 1
         # Boundaries
