@@ -18,3 +18,7 @@ pkid = 00000000-0000-0000-0000-000000000000
 [frameset]
 name = 
 
+[monitor]
+brightness = 1.0
+contrast = 1.0
+saturation = 1.0

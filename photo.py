@@ -12,11 +12,13 @@ import re
 import shutil
 import signal
 from subprocess import Popen, PIPE
+from threading import Thread
 from threading import Timer
 
 import requests
 import six
 import six.moves.configparser as ConfigParser
+from PIL import Image, ImageEnhance
 
 
 LOG = None
@@ -218,6 +220,9 @@ class ImageManager(object):
         check_units = safe_get("frame", "host_check_units", "minutes")
         self.check_interval = _normalize_interval(check_interval, check_units)
         logit("info", "Setting host check interval to", self.check_interval)
+        self.color_brightness = safe_get("monitor", "brightness")
+        self.color_contrast = safe_get("monitor", "contrast")
+        self.color_saturation = safe_get("monitor", "saturation")
 
 
     def set_image_interval(self):
@@ -291,7 +296,11 @@ class ImageManager(object):
                 shutil.move(inactive_loc, active_loc)
                 continue
             # Not local, so download it
-            self._download(img)
+            img_file = self._download(img)
+            if img_file:
+                # Don't block on the color adjustments
+                thd = Thread(target=self._adjust, args=(img_file,))
+                thd.start()
         logit("debug", "Image update is done!")
         self.load_images()
         self.show_photo()
@@ -308,6 +317,23 @@ class ImageManager(object):
             with open(outfile, "wb") as ff:
                 resp.raw.decode_content = True
                 shutil.copyfileobj(resp.raw, ff)
+            return outfile
+
+
+    def _adjust(self, img_file):
+        """Uses the local profile to adjust the image to look good on the local
+        monitor.
+        """
+        logit("debug", "Adjusting image '%s'" % img_file)
+        img = Image.open(img_file)
+        ibright = ImageEnhance.Brightness(img)
+        img = ibright.enhance(self.color_brightness)
+        icontrast = ImageEnhance.Contrast(img)
+        img = icontrast.enhance(self.color_contrast)
+        isat = ImageEnhance.Color(img)
+        img = isat.enhance(self.color_saturation)
+        img.save()
+        logit("debug", "Finished corrections for image '%s'" % img_file)
 
 
     def load_images(self, directory=None):
@@ -382,7 +408,7 @@ class ImageManager(object):
 
     def check_host(self, signum=None, frame=None):
         """Contact the host to update local status."""
-        logit("debug", "check_host called")
+        logit("info", "check_host called")
         if self.check_url is None:
             # Not configured
             logit("warning", "No host check URL defined")
