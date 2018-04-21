@@ -4,25 +4,26 @@ from __future__ import print_function
 import datetime
 import filecmp
 import glob
-import logging
 import json
 import os
 import random
 import re
 import shutil
 import signal
-from subprocess import Popen, PIPE
 from threading import Thread
 from threading import Timer
 
 import requests
 import six
 import six.moves.configparser as ConfigParser
-from PIL import Image, ImageEnhance
+
+import image
+from utils import logit
+from utils import runproc
+from utils import set_log_level
+from utils import trace
 
 
-LOG = None
-LOG_LEVEL = logging.INFO
 PHOTODIR = "images"
 INACTIVE_PHOTODIR = "inactive_images"
 DISPLAY_PHOTODIR = "display"
@@ -33,35 +34,6 @@ SHOW_CMD = "rm -f %s/display.*; cp %%s %s/display%%s" % (
 VIEWER_CMD = "sudo fbi -a --noverbose -T 1 %s >/dev/null 2>&1"
 ONE_MB = 1024 ** 2
 ONE_GB = 1024 ** 3
-
-
-def runproc(cmd, wait=True):
-    if wait:
-        kwargs = dict(stdin=PIPE, stdout=PIPE, stderr=PIPE)
-    else:
-        kwargs = dict(stdin=None, stdout=None, stderr=None)
-    proc = Popen([cmd], shell=True, close_fds=True, **kwargs)
-    if wait:
-        stdout_text, stderr_text = proc.communicate()
-        return stdout_text.decode("utf-8"), stderr_text.decode("utf-8")
-
-
-def _setup_logging():
-    global LOG
-    LOG = logging.getLogger("photo")
-    hnd = logging.FileHandler("log/photo.log")
-    formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
-    hnd.setFormatter(formatter)
-    LOG.addHandler(hnd)
-    LOG.setLevel(LOG_LEVEL)
-
-
-def logit(level, *msgs):
-    if not LOG:
-        _setup_logging()
-    text = " ".join(["%s" % msg for msg in msgs])
-    log_method = getattr(LOG, level)
-    log_method(text)
 
 
 def just_fname(path):
@@ -86,7 +58,6 @@ def get_freespace():
 
 class ImageManager(object):
     def __init__(self):
-        _setup_logging()
         self.photo_timer = self.check_timer = None
         self.parser = ConfigParser.SafeConfigParser()
         self._read_config()
@@ -159,8 +130,10 @@ class ImageManager(object):
         signal.signal(signal.SIGTSTP, self.pause)
         signal.signal(signal.SIGCONT, self.resume)
         signal.signal(signal.SIGTRAP, self.navigate)
-        self.check_timer.start()
-        self.photo_timer.start()
+        if not self.check_timer.is_alive():
+            self.check_timer.start()
+        if not self.photo_timer.is_alive():
+            self.photo_timer.start()
         logit("debug", "Timers started")
         self.show_photo()
 
@@ -190,7 +163,7 @@ class ImageManager(object):
                 return default
 
         self.log_level = safe_get("frame", "log_level", "INFO")
-        LOG.setLevel(getattr(logging, self.log_level))
+        set_log_level(self.log_level)
 
         self.reg_url = safe_get("host", "reg_url")
         if not self.reg_url:
@@ -220,9 +193,9 @@ class ImageManager(object):
         check_units = safe_get("frame", "host_check_units", "minutes")
         self.check_interval = _normalize_interval(check_interval, check_units)
         logit("info", "Setting host check interval to", self.check_interval)
-        self.color_brightness = safe_get("monitor", "brightness")
-        self.color_contrast = safe_get("monitor", "contrast")
-        self.color_saturation = safe_get("monitor", "saturation")
+        self.brightness = safe_get("monitor", "brightness")
+        self.contrast = safe_get("monitor", "contrast")
+        self.saturation = safe_get("monitor", "saturation")
 
 
     def set_image_interval(self):
@@ -286,6 +259,7 @@ class ImageManager(object):
                 shutil.move(curr_loc, new_loc)
         to_get = upd - curr
         logit("debug", "To get:", *to_get)
+        threads = []
         for img in to_get:
             logit("info", "adding", img)
             # Check if it's local
@@ -298,9 +272,16 @@ class ImageManager(object):
             # Not local, so download it
             img_file = self._download(img)
             if img_file:
+                image.adjust(img_file, self.brightness, self.contrast,
+                    self.saturation)
                 # Don't block on the color adjustments
-                thd = Thread(target=self._adjust, args=(img_file,))
-                thd.start()
+#                thd = Thread(target=image.adjust, args=(img_file,
+#                        self.brightness, self.contrast, self.saturation))
+#                thd.start()
+#                threads.append(thd)
+#        logit("debug", "Joining enhancement threads")
+#        for thd in threads:
+#            thd.join()
         logit("debug", "Image update is done!")
         self.load_images()
         self.show_photo()
@@ -318,22 +299,6 @@ class ImageManager(object):
                 resp.raw.decode_content = True
                 shutil.copyfileobj(resp.raw, ff)
             return outfile
-
-
-    def _adjust(self, img_file):
-        """Uses the local profile to adjust the image to look good on the local
-        monitor.
-        """
-        logit("debug", "Adjusting image '%s'" % img_file)
-        img = Image.open(img_file)
-        ibright = ImageEnhance.Brightness(img)
-        img = ibright.enhance(self.color_brightness)
-        icontrast = ImageEnhance.Contrast(img)
-        img = icontrast.enhance(self.color_contrast)
-        isat = ImageEnhance.Color(img)
-        img = isat.enhance(self.color_saturation)
-        img.save()
-        logit("debug", "Finished corrections for image '%s'" % img_file)
 
 
     def load_images(self, directory=None):
@@ -446,7 +411,8 @@ class ImageManager(object):
     def _update_config(self, data):
         changed = False
         new_interval = False
-        for key in ("name", "description", "interval_time", "interval_units"):
+        for key in ("name", "description", "interval_time", "interval_units",
+                "brightness", "contrast", "saturation"):
             val = data.get(key, None)
             logit("debug", "key:", key, "; val:", val)
             if val is None:
@@ -454,7 +420,9 @@ class ImageManager(object):
             local_val = getattr(self, key)
             if local_val != val:
                 setattr(self, key, val)
-                self.parser.set("frame", key, str(val))
+                monitor_keys = ("brightness", "contrast", "saturation")
+                section = "monitor" if key in monitor_keys else "frame"
+                self.parser.set(section, key, str(val))
                 changed = True
                 new_interval = new_interval or "interval" in key
         if changed:
