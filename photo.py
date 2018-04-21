@@ -58,6 +58,7 @@ def get_freespace():
 
 class ImageManager(object):
     def __init__(self):
+        self._started = False
         self.photo_timer = self.check_timer = None
         self.parser = ConfigParser.SafeConfigParser()
         self._read_config()
@@ -106,7 +107,8 @@ class ImageManager(object):
         start = now.replace(day=start_day, hour=start_hour,
                 minute=start_minute, second=0, microsecond=0)
         offset = start - now
-        return offset.total_seconds()
+        offset_secs = offset.total_seconds()
+        return offset_secs if offset_secs > 0 else 0
 
 
     def set_timer(self, typ, start=False):
@@ -126,7 +128,7 @@ class ImageManager(object):
 
     def start(self):
         signal.signal(signal.SIGHUP, self._read_config)
-        signal.signal(signal.SIGINT, self.check_host)
+        signal.signal(signal.SIGURG, self.check_host)
         signal.signal(signal.SIGTSTP, self.pause)
         signal.signal(signal.SIGCONT, self.resume)
         signal.signal(signal.SIGTRAP, self.navigate)
@@ -135,6 +137,7 @@ class ImageManager(object):
         if not self.photo_timer.is_alive():
             self.photo_timer.start()
         logit("debug", "Timers started")
+        self._started = True
         self.show_photo()
 
 
@@ -284,7 +287,6 @@ class ImageManager(object):
 #            thd.join()
         logit("debug", "Image update is done!")
         self.load_images()
-        self.show_photo()
 
 
     def _download(self, img):
@@ -347,6 +349,8 @@ class ImageManager(object):
 
 
     def show_photo(self):
+        if not self._started:
+            return
         if not self.current_images:
             return
         try:
@@ -362,6 +366,8 @@ class ImageManager(object):
                 return
         fext = os.path.splitext(fname)[-1]
 
+        if fname == self.displayed_name:
+            return
         self.displayed_name = fname
         logit("debug", "displayed image name:", self.displayed_name)
         cmd = VIEWER_CMD % fname
