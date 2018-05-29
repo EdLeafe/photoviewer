@@ -112,6 +112,10 @@ class ImageManager(object):
 
 
     def set_timer(self, typ, start=False):
+        # Clear the current timer first
+        curr_tmr = self.photo_timer if typ == "photo" else self.check_timer
+        if curr_tmr:
+            curr_tmr.cancel()
         tmr = None
         if typ == "photo":
             interval = self.initial_interval or self.interval
