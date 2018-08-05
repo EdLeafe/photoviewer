@@ -5,6 +5,7 @@ import datetime
 import filecmp
 import glob
 import json
+from multiprocessing import Pool
 import os
 import random
 import re
@@ -31,7 +32,8 @@ IMG_PAT = re.compile(r".+\.[jpg|jpeg|gif|png]")
 CONFIG_FILE = "photo.cfg"
 SHOW_CMD = "rm -f %s/display.*; cp %%s %s/display%%s" % (
         DISPLAY_PHOTODIR, DISPLAY_PHOTODIR)
-VIEWER_CMD = "sudo fbi -a --noverbose -T 1 %s >/dev/null 2>&1"
+MONITOR_CMD = "echo 'on 0' | cec-client -s -d 1"
+VIEWER_CMD = "vcgencmd display_power 1 > /dev/null 2>&1; sudo fbi -a --noverbose -T 1 %s >/dev/null 2>&1"
 ONE_MB = 1024 ** 2
 ONE_GB = 1024 ** 3
 
@@ -63,6 +65,7 @@ class ImageManager(object):
         self.parser = ConfigParser.SafeConfigParser()
         self._read_config()
         self.initial_interval = self._set_start()
+        self._set_power_on()
         self.in_check_host = False
         self.set_timer("check")
         self.set_timer("photo")
@@ -75,6 +78,12 @@ class ImageManager(object):
         self.load_images()
         self._register()
         self.start()
+
+    def _set_power_on(self):
+        # Power on the monitor and HDMI output
+        logit("debug", "Powering on the monitor")
+        out, err = runproc(MONITOR_CMD)
+        logit("debug", "Power result", out, err)
 
 
     def _set_start(self):
@@ -266,9 +275,11 @@ class ImageManager(object):
                 shutil.move(curr_loc, new_loc)
         to_get = upd - curr
         logit("debug", "To get:", *to_get)
-        threads = []
-        for img in to_get:
+        num_to_get = len(to_get)
+        images_to_process = []
+        for pos, img in enumerate(to_get):
             logit("info", "adding", img)
+            logit("debug", "PROCESSING IMAGE #%s of %s" % (pos, num_to_get))
             # Check if it's local
             inactive_loc = os.path.join(INACTIVE_PHOTODIR, img)
             if os.path.exists(inactive_loc):
@@ -279,17 +290,16 @@ class ImageManager(object):
             # Not local, so download it
             img_file = self._download(img)
             if img_file:
-                image.adjust(img_file, self.brightness, self.contrast,
-                    self.saturation)
-                # Don't block on the color adjustments
-#                thd = Thread(target=image.adjust, args=(img_file,
-#                        self.brightness, self.contrast, self.saturation))
-#                thd.start()
-#                threads.append(thd)
-#        logit("debug", "Joining enhancement threads")
-#        for thd in threads:
-#            thd.join()
-        logit("debug", "Image update is done!")
+                images_to_process.append(img_file)
+        if images_to_process:
+            num_imgs = len(images_to_process)
+            logit("debug", "Processing  %s images" % num_imgs)
+            for pos, img in enumerate(images_to_process):
+                logit("info", "Processing image %s (%s of %s)" %
+                        (img, pos+1, num_imgs))
+                image.adjust(img, self.brightness, self.contrast,
+                        self.saturation)
+        logit("info", "Image update is done!")
         self.load_images()
 
 
@@ -327,6 +337,9 @@ class ImageManager(object):
         max_index = len(self.current_images) - 1
         if new_index > max_index:
             new_index = 0
+            # Shuffle the images
+            logit("info", "All images shown; shuffling order.")
+            random.shuffle(self.current_images)
         else:
             new_index = max(0, min(max_index, new_index))
         logit("debug", "new index", new_index)
@@ -400,10 +413,12 @@ class ImageManager(object):
             if resp.status_code >= 300:
                 logit("error", resp.status_code, resp.content)
                 self.in_check_host = False
+                self.set_timer("check", True)
                 return
         except Exception as e:
-            logit("error", "check_host", e)
+            logit("error", "check_host", resp.status_code, e)
             self.in_check_host = False
+            self.set_timer("check", True)
             return
         data = resp.json()
         logit("debug", "Data:", data)
@@ -416,6 +431,7 @@ class ImageManager(object):
         logit("debug", "check_host done.")
         self.set_timer("check", True)
         self.in_check_host = False
+        self.load_images()
 
 
     def _update_config(self, data):
