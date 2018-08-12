@@ -30,6 +30,7 @@ INACTIVE_PHOTODIR = "inactive_images"
 DISPLAY_PHOTODIR = "display"
 IMG_PAT = re.compile(r".+\.[jpg|jpeg|gif|png]")
 CONFIG_FILE = "photo.cfg"
+HOST_CHECK_FILE = ".host_checked"
 SHOW_CMD = "rm -f %s/display.*; cp %%s %s/display%%s" % (
         DISPLAY_PHOTODIR, DISPLAY_PHOTODIR)
 MONITOR_CMD = "echo 'on 0' | cec-client -s -d 1"
@@ -397,6 +398,8 @@ class ImageManager(object):
     def check_host(self, signum=None, frame=None):
         """Contact the host to update local status."""
         logit("info", "check_host called")
+        # Update the flag file
+        runproc("touch %s" % HOST_CHECK_FILE)
         if self.check_url is None:
             # Not configured
             logit("warning", "No host check URL defined")
