@@ -41,7 +41,7 @@ CONFIG_FILE = os.path.join(APPDIR, "photo.cfg")
 LOG_FILE = os.path.join(LOG_DIR, "photo.log")
 HOST_CHECK_FILE = os.path.join(APPDIR, ".host_checked")
 MONITOR_CMD = "echo 'on 0' | cec-client -s -d 1"
-VIEWER_CMD = "vcgencmd display_power 1 > /dev/null 2>&1; sudo fbi -a --noverbose -T 1 %s >/dev/null 2>&1"
+VIEWER_CMD = "vcgencmd display_power 1 > /dev/null 2>&1; sudo fbi -a --noverbose -T 1 '%s' >/dev/null 2>&1"
 ONE_MB = 1024 ** 2
 ONE_GB = 1024 ** 3
 
