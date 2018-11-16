@@ -21,8 +21,10 @@ def runproc(cmd, wait=True):
 
 def _setup_logging():
     global LOG
+    # Imported here to avoid circular imports
+    import photo
     LOG = logging.getLogger("photo")
-    hnd = logging.FileHandler("log/photo.log")
+    hnd = logging.FileHandler(photo.LOG_FILE)
     formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
     hnd.setFormatter(formatter)
     LOG.addHandler(hnd)

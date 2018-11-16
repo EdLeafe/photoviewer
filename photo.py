@@ -27,10 +27,19 @@ from utils import trace
 APPDIR = "/home/pi/projects/photoviewer"
 PHOTODIR = os.path.join(APPDIR, "images")
 INACTIVE_PHOTODIR = os.path.join(APPDIR, "inactive_images")
+DOWNLOAD_PHOTODIR = os.path.join(APPDIR, "download")
+LOG_DIR = os.path.join(APPDIR, "log")
+for pth in (APPDIR, PHOTODIR, INACTIVE_PHOTODIR, DOWNLOAD_PHOTODIR, LOG_DIR):
+    try:
+        os.makedirs(pth)
+    except OSError:
+        # already there
+        pass
+
 IMG_PAT = re.compile(r".+\.[jpg|jpeg|gif|png]")
 CONFIG_FILE = os.path.join(APPDIR, "photo.cfg")
+LOG_FILE = os.path.join(LOG_DIR, "photo.log")
 HOST_CHECK_FILE = os.path.join(APPDIR, ".host_checked")
-IMG_PROCESSING_FILE = os.path.join(APPDIR, ".processing")
 MONITOR_CMD = "echo 'on 0' | cec-client -s -d 1"
 VIEWER_CMD = "vcgencmd display_power 1 > /dev/null 2>&1; sudo fbi -a --noverbose -T 1 %s >/dev/null 2>&1"
 ONE_MB = 1024 ** 2
@@ -145,16 +154,11 @@ class ImageManager(object):
             logit("debug", "Timer started for", typ)
 
 
-    def _check_unprocessed(self):
-        if os.path.exists(IMG_PROCESSING_FILE):
-            self._process_images()
-
-
     def start(self):
         update_alive()
         # If a prior import crashed during image processing, re-process the
         # images.
-        self._check_unprocessed()
+        self._process_images()
         signal.signal(signal.SIGHUP, self._read_config)
         signal.signal(signal.SIGURG, self.check_host)
         signal.signal(signal.SIGTSTP, self.pause)
@@ -302,30 +306,32 @@ class ImageManager(object):
                 active_loc = os.path.join(PHOTODIR, img)
                 shutil.move(inactive_loc, active_loc)
                 continue
-            # Not local, so download it
+            # Check if it's downloaded but unprocessed
+            download_loc = os.path.join(DOWNLOAD_PHOTODIR, img)
+            if os.path.exists(download_loc):
+                logit("info", "Image already downloaded")
+                continue
+            # Not on disk, so download it
             img_file = self._download(img)
             if img_file:
                 images_to_process.append(img_file)
-        if images_to_process:
-            self._process_images(images_to_process)
+        self._process_images()
         logit("info", "Image update is done!")
         self.load_images()
 
 
-    def _process_images(self, images_to_process=None):
-        # Create the flag to re-process images in case the app crashes midway
-        # through the process.
-        open(IMG_PROCESSING_FILE, "w")
-        if images_to_process is None:
-            # Process the whole images directory
-            images_to_process = glob.glob("%s/*.jpg" % PHOTODIR)
+    def _process_images(self):
+        images_to_process = glob.glob("%s/*.jpg" % DOWNLOAD_PHOTODIR)
+        if not images_to_process:
+            logit("debug", "No images to process")
+            return
         num_imgs = len(images_to_process)
         logit("debug", "Processing  %s images" % num_imgs)
         for pos, img in enumerate(images_to_process):
             logit("info", "Processing image %s (%s of %s)" %
                     (img, pos+1, num_imgs))
             image.adjust(img, self.brightness, self.contrast, self.saturation)
-        os.remove(IMG_PROCESSING_FILE)
+            shutil.move(img, PHOTODIR)
 
 
     def _download(self, img):
@@ -335,7 +341,7 @@ class ImageManager(object):
         logit("info", "downloading", img)
         resp = requests.get(url, headers=headers, stream=True)
         if resp.status_code == 200:
-            outfile = os.path.join(PHOTODIR, img)
+            outfile = os.path.join(DOWNLOAD_PHOTODIR, img)
             with open(outfile, "wb") as ff:
                 resp.raw.decode_content = True
                 shutil.copyfileobj(resp.raw, ff)
