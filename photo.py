@@ -5,7 +5,6 @@ import datetime
 import filecmp
 import glob
 import json
-from multiprocessing import Pool
 import os
 import random
 import re
@@ -25,14 +24,13 @@ from utils import set_log_level
 from utils import trace
 
 
-PHOTODIR = "images"
-INACTIVE_PHOTODIR = "inactive_images"
-DISPLAY_PHOTODIR = "display"
+APPDIR = "/home/pi/projects/photoviewer"
+PHOTODIR = os.path.join(APPDIR, "images")
+INACTIVE_PHOTODIR = os.path.join(APPDIR, "inactive_images")
 IMG_PAT = re.compile(r".+\.[jpg|jpeg|gif|png]")
-CONFIG_FILE = "photo.cfg"
-HOST_CHECK_FILE = ".host_checked"
-SHOW_CMD = "rm -f %s/display.*; cp %%s %s/display%%s" % (
-        DISPLAY_PHOTODIR, DISPLAY_PHOTODIR)
+CONFIG_FILE = os.path.join(APPDIR, "photo.cfg")
+HOST_CHECK_FILE = os.path.join(APPDIR, ".host_checked")
+IMG_PROCESSING_FILE = os.path.join(APPDIR, ".processing")
 MONITOR_CMD = "echo 'on 0' | cec-client -s -d 1"
 VIEWER_CMD = "vcgencmd display_power 1 > /dev/null 2>&1; sudo fbi -a --noverbose -T 1 %s >/dev/null 2>&1"
 ONE_MB = 1024 ** 2
@@ -57,6 +55,13 @@ def get_freespace():
     ret = int(ret) * ONE_MB
     logit("debug", "Free disk space =", ret)
     return ret
+
+
+def update_alive():
+    """This statement opens the file for writing, and because the handle is
+    not saved, closes it. This updates the modification time of the file.
+    """
+    open(HOST_CHECK_FILE, "w")
 
 
 class ImageManager(object):
@@ -140,7 +145,16 @@ class ImageManager(object):
             logit("debug", "Timer started for", typ)
 
 
+    def _check_unprocessed(self):
+        if os.path.exists(IMG_PROCESSING_FILE):
+            self._process_images()
+
+
     def start(self):
+        update_alive()
+        # If a prior import crashed during image processing, re-process the
+        # images.
+        self._check_unprocessed()
         signal.signal(signal.SIGHUP, self._read_config)
         signal.signal(signal.SIGURG, self.check_host)
         signal.signal(signal.SIGTSTP, self.pause)
@@ -293,15 +307,25 @@ class ImageManager(object):
             if img_file:
                 images_to_process.append(img_file)
         if images_to_process:
-            num_imgs = len(images_to_process)
-            logit("debug", "Processing  %s images" % num_imgs)
-            for pos, img in enumerate(images_to_process):
-                logit("info", "Processing image %s (%s of %s)" %
-                        (img, pos+1, num_imgs))
-                image.adjust(img, self.brightness, self.contrast,
-                        self.saturation)
+            self._process_images(images_to_process)
         logit("info", "Image update is done!")
         self.load_images()
+
+
+    def _process_images(self, images_to_process=None):
+        # Create the flag to re-process images in case the app crashes midway
+        # through the process.
+        open(IMG_PROCESSING_FILE, "w")
+        if images_to_process is None:
+            # Process the whole images directory
+            images_to_process = glob.glob("%s/*.jpg" % PHOTODIR)
+        num_imgs = len(images_to_process)
+        logit("debug", "Processing  %s images" % num_imgs)
+        for pos, img in enumerate(images_to_process):
+            logit("info", "Processing image %s (%s of %s)" %
+                    (img, pos+1, num_imgs))
+            image.adjust(img, self.brightness, self.contrast, self.saturation)
+        os.remove(IMG_PROCESSING_FILE)
 
 
     def _download(self, img):
@@ -353,7 +377,7 @@ class ImageManager(object):
             # First, handle case where current image has been deleted locally
             img_exists = os.path.exists(self.displayed_name)
             logit("debug", "image exists:", img_exists)
-            if not img_exists:
+            if not img_exists and self.displayed_name in self.current_images:
                 self.current_images.remove(self.displayed_name)
                 logit("debug", "refreshing missing images")
                 self._update_images()
@@ -398,8 +422,8 @@ class ImageManager(object):
     def check_host(self, signum=None, frame=None):
         """Contact the host to update local status."""
         logit("info", "check_host called")
-        # Update the flag file
-        runproc("touch %s" % HOST_CHECK_FILE)
+        # Update the flag file.
+        update_alive()
         if self.check_url is None:
             # Not configured
             logit("warning", "No host check URL defined")
