@@ -28,13 +28,12 @@ APPDIR = "/home/pi/projects/photoviewer"
 PHOTODIR = os.path.join(APPDIR, "images")
 INACTIVE_PHOTODIR = os.path.join(APPDIR, "inactive_images")
 DOWNLOAD_PHOTODIR = os.path.join(APPDIR, "download")
+FB_PHOTODIR = os.path.join(APPDIR, "fb")
 LOG_DIR = os.path.join(APPDIR, "log")
-for pth in (APPDIR, PHOTODIR, INACTIVE_PHOTODIR, DOWNLOAD_PHOTODIR, LOG_DIR):
-    try:
-        os.makedirs(pth)
-    except OSError:
-        # already there
-        pass
+# Make sure that all the necessary directories exist.
+for pth in (APPDIR, PHOTODIR, INACTIVE_PHOTODIR, DOWNLOAD_PHOTODIR, LOG_DIR,
+        FB_PHOTODIR):
+    os.makedirs(pth, exist_ok=True)
 
 IMG_PAT = re.compile(r".+\.[jpg|jpeg|gif|png]")
 CONFIG_FILE = os.path.join(APPDIR, "photo.cfg")
@@ -46,8 +45,31 @@ ONE_MB = 1024 ** 2
 ONE_GB = 1024 ** 3
 
 
-def just_fname(path):
-    return os.path.split(path)[-1]
+def swapext(pth, ext):
+    """Replaces the extension for the specified path with the supplied
+    extension.
+    """
+    ext = ext.lstrip(".")
+    dirname = os.path.dirname(pth)
+    basename = os.path.basename(pth)
+    newname = "%s.%s" % (os.path.splitext(basename)[0], ext)
+    return os.path.join(dirname, newname)
+
+
+def fb_path(pth):
+    """Given a path to an image file, returns the corresponding path the the
+    frame buffer directory with the same name but with the '.fb' extension.
+    """
+    img_name = os.path.basename(pth)
+    fb_name = swapext(img_name, "fb")
+    return os.path.join(FB_PHOTODIR, fb_name)
+
+
+def clean_fb(pth):
+    """Deletes the frame buffer version of an image if it exists"""
+    fb = fb_path(pth)
+    if os.path.exists(fb):
+        os.unlink(fb)
 
 
 def _normalize_interval(time_, units):
@@ -271,12 +293,12 @@ class ImageManager(object):
         the local copies if needed.
         """
         images = self.host_images
-        curr = set([just_fname(img) for img in self.current_images])
+        curr = set([os.path.basename(img) for img in self.current_images])
         upd = set(images)
         if upd == curr:
             logit("debug", "No changes in _update_images")
             # No changes
-            return
+            return False
         logit("debug", "updating images...")
         to_remove = curr - upd
         logit("debug", "To remove:", *to_remove)
@@ -284,6 +306,8 @@ class ImageManager(object):
         logit("debug", "Freespace", freespace)
         for img in to_remove:
             curr_loc = os.path.join(PHOTODIR, img)
+            # Remove the frame buffer copy, if any.
+            clean_fb(curr_loc)
             if freespace < ONE_GB:
                 # Just delete it
                 logit("info", "deleting", curr_loc)
@@ -295,7 +319,6 @@ class ImageManager(object):
         to_get = upd - curr
         logit("debug", "To get:", *to_get)
         num_to_get = len(to_get)
-        images_to_process = []
         for pos, img in enumerate(to_get):
             logit("info", "adding", img)
             logit("debug", "PROCESSING IMAGE #%s of %s" % (pos, num_to_get))
@@ -312,12 +335,10 @@ class ImageManager(object):
                 logit("info", "Image already downloaded")
                 continue
             # Not on disk, so download it
-            img_file = self._download(img)
-            if img_file:
-                images_to_process.append(img_file)
+            self._download(img)
         self._process_images()
         logit("info", "Image update is done!")
-        self.load_images()
+        return True
 
 
     def _process_images(self):
@@ -363,6 +384,10 @@ class ImageManager(object):
         """Moves to the next image. """
         logit("debug", "navigate called; current index", self.image_index)
 
+        num_images = len(self.current_images)
+        if not num_images:
+            # Currently no images specified for this display, so just return.
+            return
         new_index = self.image_index + 1
         # Boundaries
         max_index = len(self.current_images) - 1
@@ -387,7 +412,7 @@ class ImageManager(object):
                 self.current_images.remove(self.displayed_name)
                 logit("debug", "refreshing missing images")
                 self._update_images()
-            displayed_file = "%s/%s" % (DISPLAY_PHOTODIR, curr_display_list[0])
+            displayed_file = "%s/%s" % (PHOTODIR, curr_display_list[0])
             logit("debug", "comparing:", self.displayed_name, displayed_file)
             same_files = filecmp.cmp(self.displayed_name, displayed_file)
             logit("debug", "Files are", "same" if same_files else "different")
@@ -412,16 +437,29 @@ class ImageManager(object):
                 logit("error", "No images!")
                 self.load_images()
                 return
-        fext = os.path.splitext(fname)[-1]
 
         if fname == self.displayed_name:
             return
-        self.displayed_name = fname
-        logit("debug", "displayed image name:", self.displayed_name)
-        cmd = VIEWER_CMD % fname
-        logit("info", "Changing photo to", just_fname(fname))
-        logit("debug", "Command:", cmd)
+        if os.path.exists(self.displayed_name):
+            fb_loc = fb_path(self.displayed_name)
+            if not os.path.exists(fb_loc):
+                cmd = "cp -f /dev/fb0 '%s'" % fb_loc
+                runproc(cmd, wait=True)
+                logit("debug", "Created frame buffer copy:", fb_loc)
         runproc("sudo killall fbi")
+        self.displayed_name = fname
+        logit("debug", "displayed image path:", self.displayed_name)
+        logit("info", "Changing photo to", os.path.basename(fname))
+        # See if there is already a frame buffer version of the image
+        new_fb_loc = fb_path(fname)
+        if os.path.exists(new_fb_loc):
+            # Just copy it to the frame buffer device
+            cmd = "cp -f '%s' /dev/fb0" % new_fb_loc
+            runproc(cmd, wait=False)
+            logit("debug", "Retrieved frame buffer copy:", self.displayed_name)
+            return
+        cmd = VIEWER_CMD % fname
+        logit("debug", "Command:", cmd)
         runproc(cmd, wait=False)
 
 
@@ -460,11 +498,17 @@ class ImageManager(object):
         # Check for image changes
         self.host_images = data["images"]
         logit("debug", "Updating images")
-        self._update_images()
+        # This will return True if the images have changed
+        if self._update_images():
+            logit("debug", "_update_images indicated changed images")
+            self.load_images()
+            # Setting this to the end of the image list will cause navigate()
+            # to shuffle the images and start at index 0.
+            self.image_index = len(self.current_images)
+            self.navigate()
         logit("debug", "check_host done.")
         self.set_timer("check", True)
         self.in_check_host = False
-        self.load_images()
 
 
     def _update_config(self, data):
