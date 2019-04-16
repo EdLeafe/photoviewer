@@ -353,6 +353,8 @@ class ImageManager(object):
                     (img, pos+1, num_imgs))
             image.adjust(img, self.brightness, self.contrast, self.saturation)
             shutil.move(img, PHOTODIR)
+            logit("info", "Moved processed image %s from the download to the "
+                    "image directory." % img)
 
 
     def _download(self, img):
