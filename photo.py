@@ -40,7 +40,6 @@ IMG_PAT = re.compile(r".+\.[jpg|jpeg|gif|png]")
 CONFIG_FILE = os.path.join(APPDIR, "photo.cfg")
 BASE_KEY = "photoframe/{pkid}"
 LOG_FILE = os.path.join(LOG_DIR, "photo.log")
-HOST_CHECK_FILE = os.path.join(APPDIR, ".host_checked")
 MONITOR_CMD = "echo 'on 0' | cec-client -s -d 1"
 VIEWER_CMD = "vcgencmd display_power 1 > /dev/null 2>&1; sudo fbi -a --noverbose -T 1 '%s' >/dev/null 2>&1"
 ONE_MB = 1024 ** 2
@@ -88,13 +87,6 @@ def get_freespace():
     ret = int(ret) * ONE_MB
     debug("Free disk space =", ret)
     return ret
-
-
-def update_alive():
-    """This statement opens the file for writing, and because the handle is
-    not saved, closes it. This updates the modification time of the file.
-    """
-    open(HOST_CHECK_FILE, "w")
 
 
 class ImageManager(object):
@@ -173,7 +165,6 @@ class ImageManager(object):
 
 
     def start(self):
-        update_alive()
         # If a prior import crashed during image processing, re-process the
         # images.
         self._process_images()
@@ -193,18 +184,18 @@ class ImageManager(object):
         """Listen for changes on the key for this host."""
         debug("Entering main loop; watching", self.watch_key)
         # Sometimes the first connection can be very slow - around 2 minutes!
-        run_status = utils.read_key("%s/run_status" % self.watch_key)
-        debug("Run Status:", run_status)
-        if run_status and run_status.lower() == "stop":
-            sys.exit()
+        power_state = utils.read_key("%s/power_state" % self.watch_key)
+        debug("Power State:", power_state)
+        self._set_power_state(power_state)
         callback = self.process_event
         utils.watch(self.watch_key, callback)
         # Shouldn't reach here.
         sys.exit(0)
 
 
-    def _set_run_status(self, val):
-        if val and val.lower() == "stop":
+    @staticmethod
+    def _set_power_state(val):
+        if val and val.lower() in ("stop", "off"):
             sys.exit()
 
 
@@ -225,7 +216,7 @@ class ImageManager(object):
 
 
     def process_event(self, key, val):
-        actions = {"run_status": self._set_run_status,
+        actions = {"power_state": self._set_power_state,
                 "change_photo": self._change_photo,
                 "settings": self._set_settings,
                 "images": self._set_images,
