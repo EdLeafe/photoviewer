@@ -1,12 +1,16 @@
 import inspect
+import json
 import logging
 from subprocess import Popen, PIPE
 
+import etcd3
 from six.moves import StringIO
 
 
 LOG = None
 LOG_LEVEL = logging.INFO
+etcd_conn = None
+
 
 def runproc(cmd, wait=True):
     if wait:
@@ -17,6 +21,46 @@ def runproc(cmd, wait=True):
     if wait:
         stdout_text, stderr_text = proc.communicate()
         return stdout_text.decode("utf-8"), stderr_text.decode("utf-8")
+
+
+def get_etcd_client():
+    global etcd_conn
+    if not etcd_conn:
+        etcd_conn = etcd3.client(host="dodata")
+    return etcd_conn
+
+
+def make_key(uuid, action):
+    return BASE_KEY.format(uuid=uuid, action=action)
+
+
+def read_key(key):
+    """Returns the value of the specified key, or None if it is not present."""
+    clt = get_etcd_client()
+    val, meta = clt.get(key)
+    if val is not None:
+        return json.loads(val)
+
+
+def write_key(key, val):
+    clt = get_etcd_client()
+    payload = json.dumps(val)
+    clt.put(key, payload)
+
+
+def watch(prefix, callback):
+    """Watches the specified prefix for changes, and posts those changes to the
+    supplied callback function. The callback must accept two parameters,
+    representing the key and value.
+    """
+    clt = get_etcd_client()
+    logit("debug", "Starting watch for", prefix)
+    events_iterator, cancel = clt.watch_prefix(prefix)
+    for event in events_iterator:
+        key = str(event.key, "UTF-8")
+        value = str(event.value, "UTF-8")
+        data = json.loads(value)
+        callback(key, data)
 
 
 def _setup_logging():

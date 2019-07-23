@@ -1,8 +1,8 @@
 #/usr/bin/env python3
-from __future__ import print_function
-
+import configparser
 import datetime
 import filecmp
+from functools import partial
 import glob
 import json
 import os
@@ -10,21 +10,22 @@ import random
 import re
 import shutil
 import signal
-from threading import Thread
 from threading import Timer
 
+import etcd3
 import requests
-import six
-import six.moves.configparser as ConfigParser
 
 import image
+import utils
 from utils import logit
 from utils import runproc
-from utils import set_log_level
-from utils import trace
+
+info = partial(logit, "info")
+debug = partial(logit, "debug")
+error = partial(logit, "error")
 
 
-APPDIR = "/home/pi/projects/photoviewer"
+APPDIR = "/home/ed/projects/photoviewer"
 PHOTODIR = os.path.join(APPDIR, "images")
 INACTIVE_PHOTODIR = os.path.join(APPDIR, "inactive_images")
 DOWNLOAD_PHOTODIR = os.path.join(APPDIR, "download")
@@ -37,6 +38,7 @@ for pth in (APPDIR, PHOTODIR, INACTIVE_PHOTODIR, DOWNLOAD_PHOTODIR, LOG_DIR,
 
 IMG_PAT = re.compile(r".+\.[jpg|jpeg|gif|png]")
 CONFIG_FILE = os.path.join(APPDIR, "photo.cfg")
+BASE_KEY = "photoframe/{pkid}"
 LOG_FILE = os.path.join(LOG_DIR, "photo.log")
 HOST_CHECK_FILE = os.path.join(APPDIR, ".host_checked")
 MONITOR_CMD = "echo 'on 0' | cec-client -s -d 1"
@@ -84,7 +86,7 @@ def get_freespace():
     # Remove the trailing 'M'
     ret = ret.replace("M", "")
     ret = int(ret) * ONE_MB
-    logit("debug", "Free disk space =", ret)
+    debug("Free disk space =", ret)
     return ret
 
 
@@ -98,13 +100,12 @@ def update_alive():
 class ImageManager(object):
     def __init__(self):
         self._started = False
-        self.photo_timer = self.check_timer = None
-        self.parser = ConfigParser.SafeConfigParser()
+        self.photo_timer = None
+        self.parser = configparser.Safeconfigparser()
         self._read_config()
         self.initial_interval = self._set_start()
         self._set_power_on()
         self.in_check_host = False
-        self.set_timer("check")
         self.set_timer("photo")
 
         self.current_images = []
@@ -118,9 +119,9 @@ class ImageManager(object):
 
     def _set_power_on(self):
         # Power on the monitor and HDMI output
-        logit("debug", "Powering on the monitor")
+        debug("Powering on the monitor")
         out, err = runproc(MONITOR_CMD)
-        logit("debug", "Power result", out, err)
+        debug("Power result", out, err)
 
 
     def _set_start(self):
@@ -159,21 +160,16 @@ class ImageManager(object):
 
     def set_timer(self, typ, start=False):
         # Clear the current timer first
-        curr_tmr = self.photo_timer if typ == "photo" else self.check_timer
+        curr_tmr = self.photo_timer
         if curr_tmr:
             curr_tmr.cancel()
-        tmr = None
-        if typ == "photo":
-            interval = self.initial_interval or self.interval
-            self.initial_interval = 0
-            tmr = self.photo_timer = Timer(interval, self.navigate)
-        elif typ == "check":
-            tmr = self.check_timer = Timer(self.check_interval,
-                    self.check_host)
-        logit("debug", "Timer set for:", typ, tmr.interval, tmr.function)
+        interval = self.initial_interval or self.interval
+        self.initial_interval = 0
+        tmr = self.photo_timer = Timer(interval, self.navigate)
+        debug("Timer set for:", tmr.interval, tmr.function)
         if tmr and start:
             tmr.start()
-            logit("debug", "Timer started for", typ)
+            debug("Timer started")
 
 
     def start(self):
@@ -182,58 +178,105 @@ class ImageManager(object):
         # images.
         self._process_images()
         signal.signal(signal.SIGHUP, self._read_config)
-        signal.signal(signal.SIGURG, self.check_host)
         signal.signal(signal.SIGTSTP, self.pause)
         signal.signal(signal.SIGCONT, self.resume)
         signal.signal(signal.SIGTRAP, self.navigate)
-        if not self.check_timer.is_alive():
-            self.check_timer.start()
         if not self.photo_timer.is_alive():
             self.photo_timer.start()
-        logit("debug", "Timers started")
+            debug("Timer started")
         self._started = True
         self.show_photo()
+        self.main_loop()
+
+
+    def main_loop(self):
+        """Listen for changes on the key for this host."""
+        debug("Entering main loop; watching", self.watch_key)
+        # Sometimes the first connection can be very slow - around 2 minutes!
+        run_status = utils.read_key("%s/run_status" % self.watch_key)
+        debug("Run Status:", run_status)
+        if run_status and run_status.lower() == "stop":
+            sys.exit()
+        callback = self.process_event
+        utils.watch(self.watch_key, callback)
+        # Shouldn't reach here.
+        sys.exit(0)
+
+
+    def _set_run_status(self, val):
+        if val and val.lower() == "stop":
+            sys.exit()
+
+
+    def _change_photo(self, val):
+        self.navigate()
+
+
+    def _set_settings(self, val):
+        """The parameter 'val' will be a dict in the format of:
+            setting name: setting value
+        """
+        self._update_config(val)
+
+
+    def _set_images(self, val):
+        self.host_images = val
+        self._update_images()
+
+
+    def process_event(self, key, val):
+        actions = {"run_status": self._set_run_status,
+                "change_photo": self._change_photo,
+                "settings": self._set_settings,
+                "images": self._set_images,
+                }
+        action = key.replace(self.watch_key, "").lstrip("/")
+        mthd = actions.get(action)
+        if not mthd:
+            error("Unknown action received:", key, val)
+            return
+        mthd(val)
 
 
     def pause(self, signum=None, frame=None):
         self.photo_timer.cancel()
-        logit("info", "Photo timer stopped")
+        info("Photo timer stopped")
 
 
     def resume(self, signum=None, frame=None):
         self.set_timer("photo", True)
-        logit("info", "Photo timer started")
+        info("Photo timer started")
 
 
     def _read_config(self, signum=None, frame=None):
-        logit("info", "_read_config called!")
+        info("_read_config called!")
         try:
             self.parser.read(CONFIG_FILE)
-        except ConfigParser.MissingSectionHeaderError as e:
+        except configparser.MissingSectionHeaderError as e:
             # The file exists, but doesn't have the correct format.
             raise exc.InvalidConfigurationFile(e)
 
         def safe_get(section, option, default=None):
             try:
                 return self.parser.get(section, option)
-            except (ConfigParser.NoSectionError, ConfigParser.NoOptionError):
+            except (configparser.NoSectionError, configparser.NoOptionError):
                 return default
 
         self.log_level = safe_get("frame", "log_level", "INFO")
-        set_log_level(self.log_level)
+        utils.set_log_level(self.log_level)
 
         self.reg_url = safe_get("host", "reg_url")
         if not self.reg_url:
-            logit("error", "No registration URL in photo.cfg; exiting")
+            error("No registration URL in photo.cfg; exiting")
             exit()
         self.dl_url = safe_get("host", "dl_url")
         if not self.dl_url:
-            logit("error", "No download URL configured in photo.cfg; exiting")
+            error("No download URL configured in photo.cfg; exiting")
             exit()
-        self.check_url = safe_get("host", "check_url", None)
         self.frameset = safe_get("frameset", "name", "")
         self.name = safe_get("frame", "name", "undefined")
         self.pkid = safe_get("frame", "pkid", "")
+        self.watch_key = BASE_KEY.format(pkid=self.pkid)
         self.description = safe_get("frame", "description", "")
         self.orientation = safe_get("frame", "orientation", "H")
         # When to start the image rotation
@@ -244,12 +287,8 @@ class ImageManager(object):
         self.interval_units = safe_get("frame", "interval_units", "minutes")
         self.interval = _normalize_interval(self.interval_time,
                 self.interval_units)
-        logit("info", "Setting image interval to", self.interval)
+        info("Setting image interval to", self.interval)
         self.set_image_interval()
-        check_interval = int(safe_get("frame", "host_check", 120))
-        check_units = safe_get("frame", "host_check_units", "minutes")
-        self.check_interval = _normalize_interval(check_interval, check_units)
-        logit("info", "Setting host check interval to", self.check_interval)
         self.brightness = safe_get("monitor", "brightness")
         self.contrast = safe_get("monitor", "contrast")
         self.saturation = safe_get("monitor", "saturation")
@@ -284,7 +323,7 @@ class ImageManager(object):
             self.host_images = images
             self._update_images()
         else:
-            logit("error", resp.status_code, resp.text)
+            error(resp.status_code, resp.text)
             exit()
 
 
@@ -296,79 +335,84 @@ class ImageManager(object):
         curr = set([os.path.basename(img) for img in self.current_images])
         upd = set(images)
         if upd == curr:
-            logit("debug", "No changes in _update_images")
+            debug("No changes in _update_images")
             # No changes
             return False
-        logit("debug", "updating images...")
+        debug("updating images...")
         to_remove = curr - upd
-        logit("debug", "To remove:", *to_remove)
+        debug("To remove:", *to_remove)
         freespace = get_freespace()
-        logit("debug", "Freespace", freespace)
+        debug("Freespace", freespace)
         for img in to_remove:
             curr_loc = os.path.join(PHOTODIR, img)
             # Remove the frame buffer copy, if any.
             clean_fb(curr_loc)
             if freespace < ONE_GB:
                 # Just delete it
-                logit("info", "deleting", curr_loc)
+                info("deleting", curr_loc)
                 os.unlink(curr_loc)
             else:
                 new_loc = os.path.join(INACTIVE_PHOTODIR, img)
-                logit("info", "inactivating", img)
+                info("inactivating", img)
                 shutil.move(curr_loc, new_loc)
         to_get = upd - curr
-        logit("debug", "To get:", *to_get)
+        debug("To get:", *to_get)
         num_to_get = len(to_get)
         for pos, img in enumerate(to_get):
-            logit("info", "adding", img)
-            logit("debug", "PROCESSING IMAGE #%s of %s" % (pos, num_to_get))
+            info("adding", img)
+            debug("PROCESSING IMAGE #%s of %s" % (pos, num_to_get))
             # Check if it's local
             inactive_loc = os.path.join(INACTIVE_PHOTODIR, img)
             if os.path.exists(inactive_loc):
-                logit("info", "retrieving from inactive")
+                info("retrieving from inactive")
                 active_loc = os.path.join(PHOTODIR, img)
                 shutil.move(inactive_loc, active_loc)
                 continue
             # Check if it's downloaded but unprocessed
             download_loc = os.path.join(DOWNLOAD_PHOTODIR, img)
             if os.path.exists(download_loc):
-                logit("info", "Image already downloaded")
+                info("Image already downloaded")
                 continue
             # Not on disk, so download it
             self._download(img)
         self._process_images()
-        logit("info", "Image update is done!")
+        self.load_images()
+        self.show_photo()
+        info("Image update is done!")
         return True
 
 
     def _process_images(self):
         images_to_process = glob.glob("%s/*.jpg" % DOWNLOAD_PHOTODIR)
         if not images_to_process:
-            logit("debug", "No images to process")
+            debug("No images to process")
             return
         num_imgs = len(images_to_process)
-        logit("debug", "Processing  %s images" % num_imgs)
+        debug("Processing  %s images" % num_imgs)
         for pos, img in enumerate(images_to_process):
-            logit("info", "Processing image %s (%s of %s)" %
+            info("Processing image %s (%s of %s)" %
                     (img, pos+1, num_imgs))
             image.adjust(img, self.brightness, self.contrast, self.saturation)
             shutil.move(img, PHOTODIR)
-            logit("info", "Moved processed image %s from the download to the "
+            info("Moved processed image %s from the download to the "
                     "image directory." % img)
 
 
     def _download(self, img):
         headers = {"user-agent": "photoviewer"}
         url = "%s/%s" % (self.dl_url, img)
-        logit("debug", url)
-        logit("info", "downloading", img)
+        debug(url)
+        info("downloading", img)
         resp = requests.get(url, headers=headers, stream=True)
-        if resp.status_code == 200:
-            outfile = os.path.join(DOWNLOAD_PHOTODIR, img)
-            with open(outfile, "wb") as ff:
-                resp.raw.decode_content = True
-                shutil.copyfileobj(resp.raw, ff)
-            return outfile
+        if resp.status_code > 299:
+            error("Failed to dowload", url, "Message:", resp.text)
+            return
+        outfile = os.path.join(DOWNLOAD_PHOTODIR, img)
+        debug("outfile:", outfile)
+        with open(outfile, "wb") as ff:
+            resp.raw.decode_content = True
+            shutil.copyfileobj(resp.raw, ff)
+        return outfile
 
 
     def load_images(self, directory=None):
@@ -384,7 +428,7 @@ class ImageManager(object):
 
     def navigate(self, signum=None, frame=None):
         """Moves to the next image. """
-        logit("debug", "navigate called; current index", self.image_index)
+        debug("navigate called; current index", self.image_index)
 
         num_images = len(self.current_images)
         if not num_images:
@@ -396,11 +440,11 @@ class ImageManager(object):
         if new_index > max_index:
             new_index = 0
             # Shuffle the images
-            logit("info", "All images shown; shuffling order.")
+            info("All images shown; shuffling order.")
             random.shuffle(self.current_images)
         else:
             new_index = max(0, min(max_index, new_index))
-        logit("debug", "new index", new_index)
+        debug("new index", new_index)
         if new_index != self.image_index:
             self.image_index = new_index
             self.show_photo()
@@ -409,15 +453,15 @@ class ImageManager(object):
             # as the one currently displayed.
             # First, handle case where current image has been deleted locally
             img_exists = os.path.exists(self.displayed_name)
-            logit("debug", "image exists:", img_exists)
+            debug("image exists:", img_exists)
             if not img_exists and self.displayed_name in self.current_images:
                 self.current_images.remove(self.displayed_name)
-                logit("debug", "refreshing missing images")
+                debug("refreshing missing images")
                 self._update_images()
             displayed_file = "%s/%s" % (PHOTODIR, curr_display_list[0])
-            logit("debug", "comparing:", self.displayed_name, displayed_file)
+            debug("comparing:", self.displayed_name, displayed_file)
             same_files = filecmp.cmp(self.displayed_name, displayed_file)
-            logit("debug", "Files are", "same" if same_files else "different")
+            debug("Files are", "same" if same_files else "different")
             if not same_files:
                 self.show_photo()
         self.set_timer("photo", True)
@@ -431,12 +475,12 @@ class ImageManager(object):
         try:
             fname = self.current_images[self.image_index]
         except IndexError as e:
-            logit("error", "BAD INDEX", e)
+            error("BAD INDEX", e)
             if self.current_images:
                 fname = self.current_images[-1]
             else:
                 # Something's screwy
-                logit("error", "No images!")
+                error("No images!")
                 self.load_images()
                 return
 
@@ -447,70 +491,22 @@ class ImageManager(object):
             if not os.path.exists(fb_loc):
                 cmd = "cp -f /dev/fb0 '%s'" % fb_loc
                 runproc(cmd, wait=True)
-                logit("debug", "Created frame buffer copy:", fb_loc)
+                debug("Created frame buffer copy:", fb_loc)
         runproc("sudo killall fbi")
         self.displayed_name = fname
-        logit("debug", "displayed image path:", self.displayed_name)
-        logit("info", "Changing photo to", os.path.basename(fname))
+        debug("displayed image path:", self.displayed_name)
+        info("Changing photo to", os.path.basename(fname))
         # See if there is already a frame buffer version of the image
         new_fb_loc = fb_path(fname)
         if os.path.exists(new_fb_loc):
             # Just copy it to the frame buffer device
             cmd = "cp -f '%s' /dev/fb0" % new_fb_loc
             runproc(cmd, wait=False)
-            logit("debug", "Retrieved frame buffer copy:", self.displayed_name)
+            debug("Retrieved frame buffer copy:", self.displayed_name)
             return
         cmd = VIEWER_CMD % fname
-        logit("debug", "Command:", cmd)
+        debug("Command:", cmd)
         runproc(cmd, wait=False)
-
-
-    def check_host(self, signum=None, frame=None):
-        """Contact the host to update local status."""
-        logit("info", "check_host called")
-        # Update the flag file.
-        update_alive()
-        if self.check_url is None:
-            # Not configured
-            logit("warning", "No host check URL defined")
-            return
-        # If we are already in check_host, skip
-        if self.in_check_host:
-            logit("debug", "check_host called; already in the process")
-            return
-        self.in_check_host = True
-        headers = {"user-agent": "photoviewer"}
-        url = self.check_url.replace("PKID", self.pkid)
-        try:
-            resp = requests.get(url, headers=headers)
-            if resp.status_code >= 300:
-                logit("error", resp.status_code, resp.content)
-                self.in_check_host = False
-                self.set_timer("check", True)
-                return
-        except Exception as e:
-            logit("error", "check_host", resp.status_code, e)
-            self.in_check_host = False
-            self.set_timer("check", True)
-            return
-        data = resp.json()
-        logit("debug", "Data:", data)
-        # See if anything has updated on the server side
-        self._update_config(data)
-        # Check for image changes
-        self.host_images = data["images"]
-        logit("debug", "Updating images")
-        # This will return True if the images have changed
-        if self._update_images():
-            logit("debug", "_update_images indicated changed images")
-            self.load_images()
-            # Setting this to the end of the image list will cause navigate()
-            # to shuffle the images and start at index 0.
-            self.image_index = len(self.current_images)
-            self.navigate()
-        logit("debug", "check_host done.")
-        self.set_timer("check", True)
-        self.in_check_host = False
 
 
     def _update_config(self, data):
@@ -519,12 +515,17 @@ class ImageManager(object):
         for key in ("name", "description", "interval_time", "interval_units",
                 "brightness", "contrast", "saturation"):
             val = data.get(key, None)
-            logit("debug", "key:", key, "; val:", val)
+            debug("key:", key, "; val:", val)
             if val is None:
                 continue
             local_val = getattr(self, key)
             if local_val != val:
-                setattr(self, key, val)
+                try:
+                    typ = type(local_val)
+                    converted = typ(val)
+                except Exception:
+                    pass
+                setattr(self, key, converted)
                 monitor_keys = ("brightness", "contrast", "saturation")
                 section = "monitor" if key in monitor_keys else "frame"
                 self.parser.set(section, key, str(val))
@@ -536,16 +537,15 @@ class ImageManager(object):
         if new_interval:
             self.interval = _normalize_interval(self.interval_time,
                     self.interval_units)
-            logit("info", "Setting timer to", self.interval)
+            info("Setting timer to", self.interval)
             self.set_image_interval()
 
 
-    def kill_all(self):
+    def kill_timer(self):
         """Kills all timers on receiving a Ctrl-C."""
-        logit("error", "Killing timers")
+        info("Killing timer")
         self.photo_timer.cancel()
-        self.check_timer.cancel()
-        logit("error", "Timers canceled")
+        info("Timer canceled")
 
 
 if __name__ == "__main__":
@@ -554,6 +554,6 @@ if __name__ == "__main__":
     img_mgr = ImageManager()
     try:
         img_mgr.start()
-        logit("debug", "And we're off!")
+        debug("And we're off!")
     except KeyboardInterrupt:
-        img_mgr.kill_all()
+        img_mgr.kill_timer()
