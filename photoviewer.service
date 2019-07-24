@@ -7,7 +7,8 @@ User=pi
 Group=pi
 WorkingDirectory=/home/pi/projects/photoviewer
 Environment=
-ExecStart=/usr/bin/python3 /home/pi/projects/photoviewer/photo.py
+Environment="PATH=/home/pi/projects/photoviewer/vphoto/bin"
+ExecStart=/home/pi/projects/photoviewer/vphoto/bin/python3 /home/pi/projects/photoviewer/photo.py
 Restart=always    
 RestartSec=3
 

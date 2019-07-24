@@ -80,20 +80,17 @@ def _normalize_interval(time_, units):
 
 
 def get_freespace():
-    out, err = runproc("df -BM .")
-    ret = out.split('\n')[1].split()[3]
-    # Remove the trailing 'M'
-    ret = ret.replace("M", "")
-    ret = int(ret) * ONE_MB
-    debug("Free disk space =", ret)
-    return ret
+    stat = os.statvfs(".")
+    freespace = stat.f_frsize * stat.f_bavail
+    debug("Free disk space =", freespace)
+    return freespace
 
 
 class ImageManager(object):
     def __init__(self):
         self._started = False
         self.photo_timer = None
-        self.parser = configparser.Safeconfigparser()
+        self.parser = configparser.SafeConfigParser()
         self._read_config()
         self.initial_interval = self._set_start()
         self._set_power_on()
@@ -113,7 +110,7 @@ class ImageManager(object):
         # Power on the monitor and HDMI output
         debug("Powering on the monitor")
         out, err = runproc(MONITOR_CMD)
-        debug("Power result", out, err)
+        debug("Power result", out.strip(), err.strip())
 
 
     def _set_start(self):
@@ -503,6 +500,9 @@ class ImageManager(object):
     def _update_config(self, data):
         changed = False
         new_interval = False
+        if "log_level" in data:
+            self.log_level = data["log_level"]
+            utils.set_log_level(self.log_level)
         for key in ("name", "description", "interval_time", "interval_units",
                 "brightness", "contrast", "saturation"):
             val = data.get(key, None)
