@@ -4,14 +4,12 @@ dl_url = https://com-leafe-images.nyc3.cdn.digitaloceanspaces.com/photoviewer
 check_url = https://photo.leafe.com/frame/PKID/status
 
 [frame]
-name = *NAME*
-description = *DESC*
+name = FRAMENAME
+description = FRAMEDESC
 orientation = horizontal
 interval_base = *:*
 interval_time = 1
 interval_units = hours
-host_check = 10
-host_check_units = minutes
 log_level = INFO
 pkid = PKID
 
