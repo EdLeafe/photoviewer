@@ -1,6 +1,6 @@
 [host]
 reg_url = https://photo.leafe.com/register
-dl_url = https://photo.leafe.com/download
+dl_url = https://com-leafe-images.nyc3.cdn.digitaloceanspaces.com/photoviewer
 check_url = https://photo.leafe.com/frame/PKID/status
 
 [frame]
@@ -13,7 +13,7 @@ interval_units = hours
 host_check = 10
 host_check_units = minutes
 log_level = INFO
-pkid = 00000000-0000-0000-0000-000000000000
+pkid = PKID
 
 [frameset]
 name = 
