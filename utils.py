@@ -8,6 +8,7 @@ from six.moves import StringIO
 
 
 LOG = None
+LOG_FILE = None
 LOG_LEVEL = logging.INFO
 etcd_conn = None
 
@@ -55,24 +56,34 @@ def watch(prefix, callback):
     """
     clt = get_etcd_client()
     logit("debug", "Starting watch for", prefix)
-    events_iterator, cancel = clt.watch_prefix(prefix)
+    events_iterator, cancel = clt.watch_prefix("/photoframe")
     for event in events_iterator:
         key = str(event.key, "UTF-8")
+        logit("debug", "Received key:", key)
+        if key != prefix:
+            logit("debug", "Received key doesn't match prefix", prefix)
+            continue
         value = str(event.value, "UTF-8")
         data = json.loads(value)
+        logit("debug", "Data:", data)
+        logit("debug", "Calling", callback)
         callback(key, data)
+    logit("error", "WATCH ENDED" * 22)
 
 
 def _setup_logging():
     global LOG
-    # Imported here to avoid circular imports
-    import photo
     LOG = logging.getLogger("photo")
-    hnd = logging.FileHandler(photo.LOG_FILE)
+    hnd = logging.FileHandler(LOG_FILE)
     formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
     hnd.setFormatter(formatter)
     LOG.addHandler(hnd)
     LOG.setLevel(LOG_LEVEL)
+
+
+def set_log_file(pth):
+    global LOG_FILE
+    LOG_FILE = pth
 
 
 def set_log_level(level):

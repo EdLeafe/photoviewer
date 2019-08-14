@@ -3,6 +3,7 @@ import configparser
 import datetime
 import filecmp
 from functools import partial
+import getpass
 import glob
 import json
 import os
@@ -12,7 +13,6 @@ import shutil
 import signal
 from threading import Timer
 
-import etcd3
 import requests
 
 import image
@@ -24,8 +24,7 @@ info = partial(logit, "info")
 debug = partial(logit, "debug")
 error = partial(logit, "error")
 
-
-APPDIR = "/home/ed/projects/photoviewer"
+APPDIR = "/home/{user}/projects/photoviewer".format(user=getpass.getuser())
 PHOTODIR = os.path.join(APPDIR, "images")
 INACTIVE_PHOTODIR = os.path.join(APPDIR, "inactive_images")
 DOWNLOAD_PHOTODIR = os.path.join(APPDIR, "download")
@@ -35,13 +34,17 @@ LOG_DIR = os.path.join(APPDIR, "log")
 for pth in (APPDIR, PHOTODIR, INACTIVE_PHOTODIR, DOWNLOAD_PHOTODIR, LOG_DIR,
         FB_PHOTODIR):
     os.makedirs(pth, exist_ok=True)
+utils.set_log_file(os.path.join(LOG_DIR, "photo.log"))
 
 IMG_PAT = re.compile(r".+\.[jpg|jpeg|gif|png]")
 CONFIG_FILE = os.path.join(APPDIR, "photo.cfg")
-BASE_KEY = "photoframe/{pkid}"
-LOG_FILE = os.path.join(LOG_DIR, "photo.log")
-MONITOR_CMD = "echo 'on 0' | cec-client -s -d 1"
-VIEWER_CMD = "vcgencmd display_power 1 > /dev/null 2>&1; sudo fbi -a --noverbose -T 1 '%s' >/dev/null 2>&1"
+BASE_KEY = "/photoframe:{pkid}"
+MONITOR_CMD = "echo 'on 0' | /usr/bin/cec-client -s -d 1"
+FBI_CMD = "/usr/bin/sudo fbi -a --noverbose -T 1 -d /dev/fb0 '%s' >/dev/null 2>&1"
+VIEWER_PARTS = ("vcgencmd display_power 1 > /dev/null 2>&1",
+        FBI_CMD)
+VIEWER_CMD = "; ".join(VIEWER_PARTS)
+debug("VIEWER_CMD:", VIEWER_CMD)
 ONE_MB = 1024 ** 2
 ONE_GB = 1024 ** 3
 
@@ -104,7 +107,7 @@ class ImageManager(object):
         self.image_index = 0
         self.load_images()
         self._register()
-        self.start()
+
 
     def _set_power_on(self):
         # Power on the monitor and HDMI output
@@ -213,17 +216,21 @@ class ImageManager(object):
 
 
     def process_event(self, key, val):
+        debug("process_event called")
         actions = {"power_state": self._set_power_state,
                 "change_photo": self._change_photo,
                 "settings": self._set_settings,
                 "images": self._set_images,
                 }
-        action = key.replace(self.watch_key, "").lstrip("/")
+        debug("Received key: {key} and val: {val}".format(key=key, val=val))
+        action = val.get("topic")
+        data = val.get("data")
+        debug("Action:", action)
         mthd = actions.get(action)
         if not mthd:
             error("Unknown action received:", key, val)
             return
-        mthd(val)
+        mthd(data)
 
 
     def pause(self, signum=None, frame=None):
@@ -480,7 +487,7 @@ class ImageManager(object):
                 cmd = "cp -f /dev/fb0 '%s'" % fb_loc
                 runproc(cmd, wait=True)
                 debug("Created frame buffer copy:", fb_loc)
-        runproc("sudo killall fbi")
+        runproc("/usr/bin/sudo killall fbi")
         self.displayed_name = fname
         debug("displayed image path:", self.displayed_name)
         info("Changing photo to", os.path.basename(fname))
@@ -544,7 +551,7 @@ if __name__ == "__main__":
         ff.write("%s" % os.getpid())
     img_mgr = ImageManager()
     try:
-        img_mgr.start()
         debug("And we're off!")
+        img_mgr.start()
     except KeyboardInterrupt:
         img_mgr.kill_timer()
