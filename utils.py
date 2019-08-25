@@ -10,7 +10,7 @@ from six.moves import StringIO
 LOG = None
 LOG_FILE = None
 LOG_LEVEL = logging.INFO
-etcd_conn = None
+etcd_client = None
 
 
 def runproc(cmd, wait=True):
@@ -25,10 +25,10 @@ def runproc(cmd, wait=True):
 
 
 def get_etcd_client():
-    global etcd_conn
-    if not etcd_conn:
-        etcd_conn = etcd3.client(host="dodata")
-    return etcd_conn
+    global etcd_client
+    if not etcd_client:
+        etcd_client = etcd3.client(host="dodata")
+    return etcd_client
 
 
 def make_key(uuid, action):
@@ -56,13 +56,11 @@ def watch(prefix, callback):
     """
     clt = get_etcd_client()
     logit("debug", "Starting watch for", prefix)
-    events_iterator, cancel = clt.watch_prefix("/photoframe")
+    events_iterator, cancel = clt.watch_prefix(prefix)
     for event in events_iterator:
-        key = str(event.key, "UTF-8")
-        logit("debug", "Received key:", key)
-        if key != prefix:
-            logit("debug", "Received key doesn't match prefix", prefix)
-            continue
+        full_key = str(event.key, "UTF-8")
+        logit("debug", "Received key:", full_key)
+        key = full_key.split(prefix)[-1]
         value = str(event.value, "UTF-8")
         data = json.loads(value)
         logit("debug", "Data:", data)

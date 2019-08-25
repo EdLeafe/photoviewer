@@ -6,6 +6,12 @@ echo Installing requirements...
 pip install -U pip
 pip install -r requirements.txt
 
+# Copy the service file
+sudo cp photoviewer.service /lib/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable photoviewer
+
+# Set up the config file
 cp photo.cfg.template photo.cfg
 UUID=$(cat /proc/sys/kernel/random/uuid)
 echo "UUID: $UUID"

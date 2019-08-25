@@ -38,7 +38,7 @@ utils.set_log_file(os.path.join(LOG_DIR, "photo.log"))
 
 IMG_PAT = re.compile(r".+\.[jpg|jpeg|gif|png]")
 CONFIG_FILE = os.path.join(APPDIR, "photo.cfg")
-BASE_KEY = "/photoframe:{pkid}"
+BASE_KEY = "/{pkid}:"
 MONITOR_CMD = "echo 'on 0' | /usr/bin/cec-client -s -d 1"
 FBI_CMD = "/usr/bin/sudo fbi -a --noverbose -T 1 -d /dev/fb0 '%s' >/dev/null 2>&1"
 VIEWER_PARTS = ("vcgencmd display_power 1 > /dev/null 2>&1",
@@ -184,7 +184,9 @@ class ImageManager(object):
         """Listen for changes on the key for this host."""
         debug("Entering main loop; watching", self.watch_key)
         # Sometimes the first connection can be very slow - around 2 minutes!
-        power_state = utils.read_key("%s/power_state" % self.watch_key)
+        power_key = "%spower_state" % self.watch_key
+        debug("Power key:", power_key)
+        power_state = utils.read_key(power_key)
         debug("Power State:", power_state)
         self._set_power_state(power_state)
         callback = self.process_event
@@ -223,14 +225,11 @@ class ImageManager(object):
                 "images": self._set_images,
                 }
         debug("Received key: {key} and val: {val}".format(key=key, val=val))
-        action = val.get("topic")
-        data = val.get("data")
-        debug("Action:", action)
-        mthd = actions.get(action)
+        mthd = actions.get(key)
         if not mthd:
             error("Unknown action received:", key, val)
             return
-        mthd(data)
+        mthd(val)
 
 
     def pause(self, signum=None, frame=None):
@@ -333,7 +332,7 @@ class ImageManager(object):
             debug("No changes in _update_images")
             # No changes
             return False
-        debug("updating images...")
+        info("updating images...")
         to_remove = curr - upd
         debug("To remove:", *to_remove)
         freespace = get_freespace()
