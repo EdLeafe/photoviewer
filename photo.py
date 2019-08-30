@@ -202,7 +202,10 @@ class ImageManager(object):
 
 
     def _change_photo(self, val):
-        self.navigate()
+        # I want to default to forward unless there is a specific request to
+        # move backwards.
+        forward = (val[:4] != "back")
+        self.navigate(forward=forward)
 
 
     def _set_settings(self, val):
@@ -420,7 +423,7 @@ class ImageManager(object):
         random.shuffle(self.current_images)
 
 
-    def navigate(self, signum=None, frame=None):
+    def navigate(self, signum=None, forward=True, frame=None):
         """Moves to the next image. """
         debug("navigate called; current index", self.image_index)
 
@@ -428,14 +431,18 @@ class ImageManager(object):
         if not num_images:
             # Currently no images specified for this display, so just return.
             return
-        new_index = self.image_index + 1
+        delta = 1 if forward else -1
+        new_index = self.image_index + delta
         # Boundaries
         max_index = len(self.current_images) - 1
+        min_index = 0
         if new_index > max_index:
             new_index = 0
             # Shuffle the images
             info("All images shown; shuffling order.")
             random.shuffle(self.current_images)
+        elif new_index < min_index:
+            new_index = max_index
         else:
             new_index = max(0, min(max_index, new_index))
         debug("new index", new_index)
