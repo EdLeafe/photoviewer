@@ -4,13 +4,19 @@ import logging
 from subprocess import Popen, PIPE
 
 import etcd3
+from etcd3 import exceptions as etcd_exceptions
 from six.moves import StringIO
+import time
 
 
 LOG = None
 LOG_FILE = None
 LOG_LEVEL = logging.INFO
+RETRY_INTERVAL = 5
 etcd_client = None
+
+
+class EtcdConnectionError(Exception): pass
 
 
 def runproc(cmd, wait=True):
@@ -28,6 +34,12 @@ def get_etcd_client():
     global etcd_client
     if not etcd_client:
         etcd_client = etcd3.client(host="dodata")
+    # Make sure the client connection is still good
+    try:
+        status = etcd_client.status()
+    except etcd_exceptions.ConnectionFailedError as e:
+        logit("error", "Couldn't connect to the etcd server")
+        raise EtcdConnectionError
     return etcd_client
 
 
@@ -54,25 +66,39 @@ def watch(prefix, callback):
     supplied callback function. The callback must accept two parameters,
     representing the key and value.
     """
-    clt = get_etcd_client()
-    logit("debug", "Starting watch for", prefix)
-    events_iterator, cancel = clt.watch_prefix(prefix)
-    for event in events_iterator:
-        full_key = str(event.key, "UTF-8")
-        logit("debug", "Received key:", full_key)
-        key = full_key.split(prefix)[-1]
-        value = str(event.value, "UTF-8")
-        data = json.loads(value)
-        logit("debug", "Data:", data)
-        logit("debug", "Calling", callback)
-        callback(key, data)
-    logit("error", "WATCH ENDED" * 22)
+    logit("info", "Starting watch for", prefix)
+
+    while True:
+        clt = None
+        while not clt:
+            try:
+                clt = get_etcd_client()
+            except EtcdConnectionError:
+                logit("info", "FAILED TO GET CLIENT; SLEEPING...")
+                time.sleep(RETRY_INTERVAL)
+        try:
+            logit("debug", "WATCHING PREFIX '{}'".format(prefix))
+            event = clt.watch_once(prefix, timeout=10)
+            logit("info", "GOT Event", type(event), event)
+            # Make sure it isn't a connection event
+            if not hasattr(event, "key"):
+                logit("error", str(event))
+                continue
+            full_key = str(event.key, "UTF-8")
+            key = full_key.split(prefix)[-1]
+            value = str(event.value, "UTF-8")
+            data = json.loads(value)
+            callback(key, data)
+        except ValueError as e:
+            logit("debug", "VALUE ERROR!")
+        except etcd_exceptions.WatchTimedOut as e:
+            logit("debug", "TIMED OUT")
 
 
 def _setup_logging():
     global LOG
     LOG = logging.getLogger("photo")
-    hnd = logging.FileHandler(LOG_FILE)
+    hnd = logging.FileHandler(LOG_FILE or "logit.log")
     formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
     hnd.setFormatter(formatter)
     LOG.addHandler(hnd)
