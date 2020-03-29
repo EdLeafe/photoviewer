@@ -2,7 +2,6 @@
 import configparser
 import datetime
 import filecmp
-from functools import partial
 import getpass
 import glob
 import json
@@ -17,12 +16,8 @@ import requests
 
 import image
 import utils
-from utils import logit
+from utils import debug, info, error
 from utils import runproc
-
-info = partial(logit, "info")
-debug = partial(logit, "debug")
-error = partial(logit, "error")
 
 APPDIR = "/home/{user}/projects/photoviewer".format(user=getpass.getuser())
 PHOTODIR = os.path.join(APPDIR, "images")

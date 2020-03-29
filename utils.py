@@ -2,12 +2,13 @@ import functools
 import inspect
 import json
 import logging
+from six.moves import StringIO
 from subprocess import Popen, PIPE
+import time
 
 import etcd3
 from etcd3 import exceptions as etcd_exceptions
-from six.moves import StringIO
-import time
+import tenacity
 
 
 LOG = None
@@ -31,6 +32,7 @@ def runproc(cmd, wait=True):
         return stdout_text.decode("utf-8"), stderr_text.decode("utf-8")
 
 
+@tenacity.retry(wait=tenacity.wait_exponential())
 def get_etcd_client():
     global etcd_client
     if not etcd_client:
@@ -79,7 +81,7 @@ def watch(prefix, callback):
                 time.sleep(RETRY_INTERVAL)
         try:
             logdebug("WATCHING PREFIX '{}'".format(prefix))
-            even = clt.watch_once(prefix, timeout=30)
+            event = clt.watch_prefix_once(prefix, timeout=30)
             loginfo("GOT Event", type(event), event)
             # Make sure it isn't a connection event
             if not hasattr(event, "key"):
@@ -125,10 +127,9 @@ def logit(level, *msgs):
     log_method(text)
 
 
-logdebug = functools.partial(logit, "debug")
-loginfo = functools.partial(logit, "info")
-logwarn = functools.partial(logit, "warning")
-logerror = functools.partial(logit, "error")
+info = functools.partial(logit, "info")
+debug = functools.partial(logit, "debug")
+error = partialfunctools.(logit, "error")
 
 
 def trace():
