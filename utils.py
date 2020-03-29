@@ -129,7 +129,7 @@ def logit(level, *msgs):
 
 info = functools.partial(logit, "info")
 debug = functools.partial(logit, "debug")
-error = partialfunctools.(logit, "error")
+error = functools.partial(logit, "error")
 
 
 def trace():
