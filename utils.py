@@ -1,3 +1,4 @@
+import functools
 import inspect
 import json
 import logging
@@ -11,7 +12,7 @@ import time
 
 LOG = None
 LOG_FILE = None
-LOG_LEVEL = logging.INFO
+LOG_LEVEL = logging.DEBUG
 RETRY_INTERVAL = 5
 etcd_client = None
 
@@ -66,7 +67,7 @@ def watch(prefix, callback):
     supplied callback function. The callback must accept two parameters,
     representing the key and value.
     """
-    logit("info", "Starting watch for", prefix)
+    loginfo("Starting watch for", prefix)
 
     while True:
         clt = None
@@ -77,12 +78,12 @@ def watch(prefix, callback):
                 logit("info", "FAILED TO GET CLIENT; SLEEPING...")
                 time.sleep(RETRY_INTERVAL)
         try:
-            logit("debug", "WATCHING PREFIX '{}'".format(prefix))
-            event = clt.watch_once(prefix, timeout=10)
-            logit("info", "GOT Event", type(event), event)
+            logdebug("WATCHING PREFIX '{}'".format(prefix))
+            even = clt.watch_once(prefix, timeout=30)
+            loginfo("GOT Event", type(event), event)
             # Make sure it isn't a connection event
             if not hasattr(event, "key"):
-                logit("error", str(event))
+                logerror(str(event))
                 continue
             full_key = str(event.key, "UTF-8")
             key = full_key.split(prefix)[-1]
@@ -90,9 +91,9 @@ def watch(prefix, callback):
             data = json.loads(value)
             callback(key, data)
         except ValueError as e:
-            logit("debug", "VALUE ERROR!")
+            logdebug("VALUE ERROR!")
         except etcd_exceptions.WatchTimedOut as e:
-            logit("debug", "TIMED OUT")
+            logdebug("TIMED OUT")
 
 
 def _setup_logging():
@@ -122,6 +123,12 @@ def logit(level, *msgs):
     text = " ".join(["%s" % msg for msg in msgs])
     log_method = getattr(LOG, level)
     log_method(text)
+
+
+logdebug = functools.partial(logit, "debug")
+loginfo = functools.partial(logit, "info")
+logwarn = functools.partial(logit, "warning")
+logerror = functools.partial(logit, "error")
 
 
 def trace():
