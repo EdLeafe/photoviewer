@@ -46,10 +46,6 @@ def get_etcd_client():
     return etcd_client
 
 
-def make_key(uuid, action):
-    return BASE_KEY.format(uuid=uuid, action=action)
-
-
 def read_key(key):
     """Returns the value of the specified key, or None if it is not present."""
     clt = get_etcd_client()
@@ -69,7 +65,7 @@ def watch(prefix, callback):
     supplied callback function. The callback must accept two parameters,
     representing the key and value.
     """
-    loginfo("Starting watch for", prefix)
+    info("Starting watch for", prefix)
 
     while True:
         clt = None
@@ -77,15 +73,15 @@ def watch(prefix, callback):
             try:
                 clt = get_etcd_client()
             except EtcdConnectionError:
-                logit("info", "FAILED TO GET CLIENT; SLEEPING...")
+                info("FAILED TO GET CLIENT; SLEEPING...")
                 time.sleep(RETRY_INTERVAL)
         try:
-            logdebug("WATCHING PREFIX '{}'".format(prefix))
+            debug("WATCHING PREFIX '{}'".format(prefix))
             event = clt.watch_prefix_once(prefix, timeout=30)
-            loginfo("GOT Event", type(event), event)
+            info("GOT Event", type(event), event)
             # Make sure it isn't a connection event
             if not hasattr(event, "key"):
-                logerror(str(event))
+                error(str(event))
                 continue
             full_key = str(event.key, "UTF-8")
             key = full_key.split(prefix)[-1]
@@ -93,9 +89,9 @@ def watch(prefix, callback):
             data = json.loads(value)
             callback(key, data)
         except ValueError as e:
-            logdebug("VALUE ERROR!")
+            debug("VALUE ERROR!")
         except etcd_exceptions.WatchTimedOut as e:
-            logdebug("TIMED OUT")
+            debug("TIMED OUT")
 
 
 def _setup_logging():
@@ -116,6 +112,7 @@ def set_log_file(pth):
 def set_log_level(level):
     if not LOG:
         _setup_logging()
+    info("Setting log level to", level)
     LOG.setLevel(getattr(logging, level))
 
 

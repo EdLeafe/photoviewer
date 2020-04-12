@@ -3,6 +3,7 @@ reg_url = https://photo.leafe.com/register
 dl_url = https://com-leafe-images.nyc3.cdn.digitaloceanspaces.com/photoviewer
 
 [frame]
+pkid = PKID
 name = FRAMENAME
 description = FRAMEDESC
 orientation = horizontal
@@ -10,10 +11,6 @@ interval_base = *:*
 interval_time = 1
 interval_units = hours
 log_level = INFO
-pkid = PKID
-
-[frameset]
-name = 
 
 [monitor]
 brightness = 1.0
