@@ -66,10 +66,6 @@ def get_etcd_client():
     return etcd_client
 
 
-def make_key(uuid, action):
-    return BASE_KEY.format(uuid=uuid, action=action)
-
-
 def read_key(key):
     """Returns the value of the specified key, or None if it is not present."""
     clt = get_etcd_client()
@@ -136,6 +132,7 @@ def set_log_file(pth):
 def set_log_level(level):
     if not LOG:
         _setup_logging()
+    info("Setting log level to", level)
     LOG.setLevel(getattr(logging, level))
 
 
