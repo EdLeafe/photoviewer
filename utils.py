@@ -2,6 +2,7 @@ import functools
 import inspect
 import json
 import logging
+import six
 from six.moves import StringIO
 from subprocess import Popen, PIPE
 import time
@@ -71,6 +72,7 @@ def read_key(key):
     clt = get_etcd_client()
     val, meta = clt.get(key)
     if val is not None:
+        val = six.ensure_text(val)
         return json.loads(val)
 
 
