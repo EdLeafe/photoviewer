@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 echo Creating the virtualenv...
-python3 -m venv vphoto
-source vphoto/bin/activate
+python3 -m venv ~/venvs/photo
+source ~/venvs/photo/bin/activate
 echo Installing requirements...
-pip install -U pip
+pip install -U pip setuptools wheel
 pip install -r requirements.txt
 
 # Copy the service file

@@ -1,4 +1,6 @@
-etcd3
 Pillow
+etcd3
+ipython
+pytest-pudb
 requests
 tenacity
