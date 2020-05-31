@@ -1,0 +1,28 @@
+<html>
+<head>
+  <meta http-equiv="refresh" content="%%INTERVAL%%" />
+  <style>
+    html, body {
+      margin: 0;
+      height: 100%;
+    }
+    img {
+      position: fixed;
+      top: 0;
+      left: 0;
+      min-width: 100%;
+      min-height: 100%;
+      height: auto;
+      width: 100%;
+      object-fit: cover;
+    }
+  </style>
+</head>
+<body>
+<img src="%%URL%%" />
+</body>
+</html>
+      <!--
+      display: block;
+      object-fit: cover;
+      -->
