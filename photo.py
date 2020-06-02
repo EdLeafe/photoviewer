@@ -94,7 +94,16 @@ class ImageManager(object):
         self.in_check_host = False
         self.set_timer("photo")
 
-        self.browser = webbrowser.get(BROWSER_TYPE)
+        try:
+            self.browser = webbrowser.get(BROWSER_TYPE)
+        except webbrowser.Error as e:
+            error("BROWSER_TYPE", e)
+            try:
+                self.browser = webbrowser.get()
+            except webbrowser.Error as e:
+                error("NO BROWSER_TYPE", e)
+
+            
         self.image_list = []
         self.displayed_name = ""
         self.image_index = 0
