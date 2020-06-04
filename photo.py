@@ -1,24 +1,20 @@
 # /usr/bin/env python3
 import configparser
 import datetime
-import filecmp
 import getpass
-import glob
-import json
+import http.server
 import os
 import random
-import re
-import shutil
 import signal
-from threading import Timer
-import webbrowser
+import socketserver
+from threading import Thread, Timer
+import time
 
 import requests
 
-import image
 import utils
-from utils import debug, info, error
-from utils import runproc
+from utils import debug, enc, error, info, runproc
+
 
 APPDIR = "/home/{user}/projects/photoviewer".format(user=getpass.getuser())
 LOG_DIR = os.path.join(APPDIR, "log")
@@ -27,19 +23,11 @@ for pth in (APPDIR, LOG_DIR):
     os.makedirs(pth, exist_ok=True)
 utils.set_log_file(os.path.join(LOG_DIR, "photo.log"))
 
-IMG_PAT = re.compile(r".+\.[jpg|jpeg|gif|png]")
 CONFIG_FILE = os.path.join(APPDIR, "photo.cfg")
 BASE_KEY = "/{pkid}:"
 MONITOR_CMD = "echo 'on 0' | /usr/bin/cec-client -s -d 1"
-HTML_TEMPLATE = "main.html.template"
-HTML_OUT = "main.html"
-INTERVAL_PLACEHOLDER = "%%INTERVAL%%"
-URL_PLACEHOLDER = "%%URL%%"
 
-ONE_MB = 1024 ** 2
-ONE_GB = 1024 ** 3
-
-BROWSER_TYPE = "chromium-browser"
+PORT = 9001
 
 
 def swapext(pth, ext):
@@ -82,38 +70,55 @@ def get_freespace():
     return freespace
 
 
+def run_webserver(mgr):
+    with socketserver.TCPServer(("", PORT), TestHandler) as httpd:
+        httpd.mgr = mgr
+        debug("serving at port", PORT)
+        httpd.serve_forever()
+
+
+class TestHandler(http.server.SimpleHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == "/status":
+            mgr = self.server.mgr
+            url = mgr.get_url()
+            while not url:
+                time.sleep(1)
+                url = mgr.get_url()
+            mgr.clear_url()
+            self.send_response(200)
+            self.end_headers()
+            debug("Writing photo URL to browser")
+            self.wfile.write(enc(url))
+        else:
+            with open("main.html") as ff:
+                html = ff.read()
+            debug("Writing HTML to browser")
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(enc(html))
+
+
 class ImageManager(object):
     def __init__(self):
         self._started = False
         self._in_read_config = False
         self.photo_timer = None
+        self.photo_url = ""
         self.parser = configparser.ConfigParser()
         self._read_config()
         self.initial_interval = self._set_start()
         self._set_power_on()
         self.in_check_host = False
-        self.set_timer("photo")
-
-        try:
-            self.browser = webbrowser.get(BROWSER_TYPE)
-        except webbrowser.Error as e:
-            error("BROWSER_TYPE", e)
-            try:
-                self.browser = webbrowser.get()
-            except webbrowser.Error as e:
-                error("NO BROWSER_TYPE", e)
-
-            
         self.image_list = []
         self.displayed_name = ""
         self.image_index = 0
         self._register()
+        self.start_server()
 
     def start(self):
         self._set_signals()
-        if not self.photo_timer.is_alive():
-            self.photo_timer.start()
-            debug("Timer started")
+        self.set_timer()
         self._started = True
         self.show_photo()
         self.main_loop()
@@ -131,6 +136,11 @@ class ImageManager(object):
         utils.watch(self.watch_key, callback)
         # Shouldn't reach here.
         sys.exit(0)
+
+    def start_server(self):
+        t = Thread(target=run_webserver, args=(self,))
+        t.start()
+        debug("Webserver started")
 
     def _set_power_on(self):
         # Power on the monitor and HDMI output
@@ -171,26 +181,17 @@ class ImageManager(object):
         offset_secs = offset.total_seconds()
         return offset_secs if offset_secs > 0 else 0
 
-    def set_timer(self, typ, start=False):
-        # Clear the current timer first
-        curr_tmr = self.photo_timer
-        if curr_tmr:
-            curr_tmr.cancel()
-        if self.initial_interval:
-            interval = self.initial_interval
-            self.initial_interval = 0
-        else:
-            diff = self.interval * (self.variance_pct / 100)
-            interval = round(random.uniform(self.interval - diff, self.interval + diff))
-        debug("Timer interval:", interval)
-        tmr = self.photo_timer = Timer(interval, self.on_timer_expired)
-        debug("Timer set for:", tmr.interval, tmr.function)
-        if tmr and start:
-            tmr.start()
-            debug("Timer started")
+    def set_timer(self, start=True):
+        diff = self.interval * (self.variance_pct / 100)
+        interval = round(random.uniform(self.interval - diff, self.interval + diff))
+        self.photo_timer = Timer(interval, self.on_timer_expired)
+        debug("Timer {} created with interval {}".format(id(self.photo_timer), interval))
+        if start:
+            self.photo_timer.start()
+            info("Timer started", id(self.photo_timer))
 
     def on_timer_expired(self):
-        debug("Timer Expired")
+        info("Timer Expired", id(self.photo_timer))
         self.navigate()
 
     def _set_signals(self):
@@ -217,8 +218,8 @@ class ImageManager(object):
         self._update_config(val)
 
     def _set_images(self, val):
-        self.host_images = val
-        self._update_images()
+        self.image_list = val
+        self.navigate()
 
     def process_event(self, key, val):
         debug("process_event called")
@@ -228,7 +229,7 @@ class ImageManager(object):
             "settings": self._set_settings,
             "images": self._set_images,
         }
-        debug("Received key: {key} and val: {val}".format(key=key, val=val))
+        info("Received key: {key} and val: {val}".format(key=key, val=val))
         mthd = actions.get(key)
         if not mthd:
             error("Unknown action received:", key, val)
@@ -240,7 +241,7 @@ class ImageManager(object):
         info("Photo timer stopped")
 
     def resume(self, signum=None, frame=None):
-        self.set_timer("photo", True)
+        self.set_timer()
         info("Photo timer started")
 
     def _read_config(self, signum=None, frame=None):
@@ -249,7 +250,6 @@ class ImageManager(object):
             return
         self._in_read_config = True
         info("_read_config called!")
-        debug("_read_config stack", utils.log_point())
         try:
             self.parser.read(CONFIG_FILE)
         except configparser.MissingSectionHeaderError as e:
@@ -317,8 +317,7 @@ class ImageManager(object):
         if not self.photo_timer:
             # Starting up
             return
-        self.photo_timer.cancel()
-        self.set_timer("photo", True)
+        self.set_timer()
 
     def _register(self):
         headers = {"user-agent": "photoviewer"}
@@ -369,7 +368,7 @@ class ImageManager(object):
             self.show_photo()
         elif new_index == 0:
             self.show_photo()
-        self.set_timer("photo", True)
+        self.set_timer()
 
     def show_photo(self):
         if not self._started:
@@ -390,16 +389,13 @@ class ImageManager(object):
         if fname == self.displayed_name:
             return
         info("Showing photo", fname)
-        url = os.path.join(self.dl_url, fname)
-        self.update_html(url)
+        self.photo_url = os.path.join(self.dl_url, fname)
 
-    def update_html(self, url):
-        with open(HTML_TEMPLATE) as ff:
-            html = ff.read()
-        html = html.replace(INTERVAL_PLACEHOLDER, str(self.interval))
-        html = html.replace(URL_PLACEHOLDER, url)
-        with open(HTML_OUT, "w") as ff:
-            html = ff.write(html)
+    def get_url(self):
+        return self.photo_url
+
+    def clear_url(self):
+        self.photo_url = ""
 
     def _update_config(self, data):
         changed = False
@@ -443,7 +439,7 @@ class ImageManager(object):
             self.set_image_interval()
 
     def kill_timer(self):
-        """Kills all timers on receiving a Ctrl-C."""
+        """Kills the photo timer on receiving a Ctrl-C."""
         info("Killing timer")
         self.photo_timer.cancel()
         info("Timer canceled")

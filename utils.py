@@ -35,6 +35,17 @@ debug = functools.partial(logit, "debug")
 error = functools.partial(logit, "error")
 
 
+def enc(val):
+    """Returns the passed value utf-8 encoded if it is a string, or unchanged
+    if it is already bytes.
+    """
+    try:
+        return val.encode("utf-8")
+    except AttributeError:
+        # Not a string
+        return val
+
+
 def trace():
     import pudb
     pudb.set_trace()
@@ -88,6 +99,7 @@ def watch(prefix, callback):
     representing the key and value.
     """
     info("Starting watch for", prefix)
+    debug("WATCH", prefix, callback)
 
     while True:
         clt = None
