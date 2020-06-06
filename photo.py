@@ -73,7 +73,7 @@ def get_freespace():
 def run_webserver(mgr):
     with socketserver.TCPServer(("", PORT), TestHandler) as httpd:
         httpd.mgr = mgr
-        debug("serving at port", PORT)
+        info("Webserver running on port", PORT)
         httpd.serve_forever()
 
 
