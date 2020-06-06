@@ -336,6 +336,7 @@ class ImageManager(object):
                 with open(CONFIG_FILE, "w") as ff:
                     self.parser.write(ff)
             self.image_list = images
+            random.shuffle(self.image_list)
         else:
             error(resp.status_code, resp.text)
             exit()
