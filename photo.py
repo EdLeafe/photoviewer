@@ -1,7 +1,6 @@
 # /usr/bin/env python3
 import configparser
 import datetime
-import getpass
 import http.server
 import os
 import random
@@ -15,8 +14,7 @@ import requests
 import utils
 from utils import debug, enc, error, info, runproc
 
-
-APPDIR = "/home/{user}/projects/photoviewer".format(user=getpass.getuser())
+APPDIR = os.path.expanduser("~/projects/photoviewer")
 LOG_DIR = os.path.join(APPDIR, "log")
 # Make sure that all the necessary directories exist.
 for pth in (APPDIR, LOG_DIR):
@@ -363,6 +361,7 @@ class ImageManager(object):
             new_index = max_index
         else:
             new_index = max(0, min(max_index, new_index))
+        debug("image index", self.image_index)
         debug("new index", new_index)
         if new_index != self.image_index:
             self.image_index = new_index
