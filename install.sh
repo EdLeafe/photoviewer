@@ -19,6 +19,19 @@ sudo cp photoviewer.service /lib/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable photoviewer
 
+# Create the cron jobs to turn the monitor on/off
+command="# Turn monitor off at 11pm"
+cat <(fgrep -i -v "$command" <(crontab -l)) <(echo "$command") | crontab -
+command="echo 'standby 0' | /usr/bin/cec-client -s -d 1"
+job="0 23 * * * $command"
+cat <(fgrep -i -v "$command" <(crontab -l)) <(echo "$job") | crontab -
+
+command="# Turn monitor on at 6:15am"
+cat <(fgrep -i -v "$command" <(crontab -l)) <(echo "$command") | crontab -
+command="echo 'on 0' | /usr/bin/cec-client -s -d 1"
+job="15 6 * * * $command"
+cat <(fgrep -i -v "$command" <(crontab -l)) <(echo "$job") | crontab -
+
 # Set up the config file
 cp photo.cfg.template photo.cfg
 UUID=$(cat /proc/sys/kernel/random/uuid)
