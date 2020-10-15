@@ -69,13 +69,13 @@ def get_freespace():
 
 
 def run_webserver(mgr):
-    with socketserver.TCPServer(("", PORT), TestHandler) as httpd:
+    with socketserver.TCPServer(("", PORT), PhotoHandler) as httpd:
         httpd.mgr = mgr
         info("Webserver running on port", PORT)
         httpd.serve_forever()
 
 
-class TestHandler(http.server.SimpleHTTPRequestHandler):
+class PhotoHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/status":
             mgr = self.server.mgr
@@ -102,6 +102,7 @@ class ImageManager(object):
         self._started = False
         self._in_read_config = False
         self.photo_timer = None
+        self.timer_start = None
         self.photo_url = ""
         self.parser = configparser.ConfigParser()
         self._read_config()
@@ -115,6 +116,7 @@ class ImageManager(object):
         self.start_server()
 
     def start(self):
+#        self.check_webbrowser()
         self._set_signals()
         self.set_timer()
         self._started = True
@@ -182,14 +184,21 @@ class ImageManager(object):
     def set_timer(self, start=True):
         diff = self.interval * (self.variance_pct / 100)
         interval = round(random.uniform(self.interval - diff, self.interval + diff))
+        if self.photo_timer:
+            self.photo_timer.cancel()
         self.photo_timer = Timer(interval, self.on_timer_expired)
         debug("Timer {} created with interval {}".format(id(self.photo_timer), interval))
+        next_change = datetime.datetime.now() + datetime.timedelta(seconds=interval)
+        info("Next photo change scheduled for {}".format(next_change.strftime("%H:%M:%S")))
         if start:
             self.photo_timer.start()
-            info("Timer started", id(self.photo_timer))
+            self.timer_start = time.time()
+            info("Timer started")
 
     def on_timer_expired(self):
-        info("Timer Expired", id(self.photo_timer))
+        info("Timer Expired")
+#        self.check_webbrowser()
+        self.check_webserver()
         self.navigate()
 
     def _set_signals(self):
@@ -307,7 +316,6 @@ class ImageManager(object):
             error("No download URL configured in photo.cfg; exiting")
             exit()
         self.interval = _normalize_interval(self.interval_time, self.interval_units)
-        info("Setting image interval to", self.interval)
         self.set_image_interval()
         self._in_read_config = False
 
@@ -338,6 +346,17 @@ class ImageManager(object):
         else:
             error(resp.status_code, resp.text)
             exit()
+
+    @staticmethod
+    def check_webbrowser():
+        if not utils.check_browser():
+            info("Web browser not running; restarting")
+            utils.start_browser()
+
+    def check_webserver(self):
+        if not utils.check_port(PORT):
+            info("Webserver port not listening; restarting")
+            self.start_server()
 
     def navigate(self, signum=None, forward=True, frame=None):
         """Moves to the next image. """
@@ -388,6 +407,10 @@ class ImageManager(object):
 
         if fname == self.displayed_name:
             return
+        if self.timer_start:
+            elapsed = round(time.time() - self.timer_start, 2)
+            if elapsed:
+                info("Elapsed time:", utils.human_time(elapsed))
         info("Showing photo", fname)
         self.photo_url = os.path.join(self.dl_url, fname)
 

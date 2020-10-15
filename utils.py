@@ -4,6 +4,7 @@ import json
 import logging
 import six
 from six.moves import StringIO
+import socket
 from subprocess import Popen, PIPE
 import time
 
@@ -15,6 +16,9 @@ import tenacity
 LOG = None
 LOG_FILE = None
 LOG_LEVEL = logging.INFO
+MINUTE_SECS = 60
+HOUR_SECS = MINUTE_SECS * 60
+DAY_SECS = HOUR_SECS * 24
 RETRY_INTERVAL = 5
 etcd_client = None
 
@@ -60,6 +64,21 @@ def runproc(cmd, wait=True):
     if wait:
         stdout_text, stderr_text = proc.communicate()
         return stdout_text.decode("utf-8"), stderr_text.decode("utf-8")
+
+
+def human_time(seconds):
+    """Given a time value in seconds, returns a more human-readable string."""
+    days, seconds = divmod(seconds, DAY_SECS)
+    hours, seconds = divmod(seconds, HOUR_SECS)
+    minutes, seconds = divmod(seconds, MINUTE_SECS)
+    seconds = round(seconds, 2)
+    if days:
+        return f"{int(days)}d, {int(hours)}h, {int(minutes)}m, {seconds}s"
+    elif hours:
+        return f"{int(hours)}h, {int(minutes)}m, {seconds}s"
+    elif minutes:
+        return f"{int(minutes)}m, {seconds}s"
+    return f"{seconds}s"
 
 
 @tenacity.retry(wait=tenacity.wait_exponential())
@@ -126,6 +145,26 @@ def watch(prefix, callback):
             debug("VALUE ERROR!")
         except etcd_exceptions.WatchTimedOut as e:
             debug("TIMED OUT")
+
+
+def check_port(port, host="localhost"):
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    result = sock.connect_ex((host, port))
+    # A result of zero means the port is open
+    return result == 0
+
+
+def check_browser():
+    out, err = runproc("pgrep chromium")
+    return bool(out)
+
+
+def start_browser(url):
+    cmd = ("chromium-browser --kiosk --ignore-certificate-errors "
+        f"--disable-restore-session-state {url}")
+    info(f"Starting webbrowser with command: {cmd}")
+    out, err = runproc(cmd)
+    info(f"Result: {out}. Error: {err}")
 
 
 def _setup_logging():
