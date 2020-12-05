@@ -24,6 +24,7 @@ utils.set_log_file(os.path.join(LOG_DIR, "photo.log"))
 CONFIG_FILE = os.path.join(APPDIR, "photo.cfg")
 BASE_KEY = "/{pkid}:"
 MONITOR_CMD = "echo 'on 0' | /usr/bin/cec-client -s -d 1"
+BROWSER_CYCLE = 30
 
 PORT = 9001
 
@@ -80,7 +81,11 @@ class PhotoHandler(http.server.SimpleHTTPRequestHandler):
         if self.path == "/status":
             mgr = self.server.mgr
             url = mgr.get_url()
+            start = time.time()
             while not url:
+                if (time.time() - start) > BROWSER_CYCLE:
+                    url = mgr.get_last_url()
+                    break
                 time.sleep(1)
                 url = mgr.get_url()
             mgr.clear_url()
@@ -104,6 +109,7 @@ class ImageManager(object):
         self.photo_timer = None
         self.timer_start = None
         self.photo_url = ""
+        self.last_url = ""
         self.parser = configparser.ConfigParser()
         self._read_config()
         self.initial_interval = self._set_start()
@@ -412,10 +418,13 @@ class ImageManager(object):
             if elapsed:
                 info("Elapsed time:", utils.human_time(elapsed))
         info("Showing photo", fname)
-        self.photo_url = os.path.join(self.dl_url, fname)
+        self.photo_url = self.last_url = os.path.join(self.dl_url, fname)
 
     def get_url(self):
         return self.photo_url
+
+    def get_last_url(self):
+        return self.last_url
 
     def clear_url(self):
         self.photo_url = ""
