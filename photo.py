@@ -24,7 +24,7 @@ utils.set_log_file(os.path.join(LOG_DIR, "photo.log"))
 CONFIG_FILE = os.path.join(APPDIR, "photo.cfg")
 BASE_KEY = "/{pkid}:"
 MONITOR_CMD = "echo 'on 0' | /usr/bin/cec-client -s -d 1"
-BROWSER_CYCLE = 30
+BROWSER_CYCLE = 60
 
 PORT = 9001
 

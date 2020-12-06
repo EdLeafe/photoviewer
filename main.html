@@ -1,6 +1,6 @@
 <html>
 <head>
-<meta http-equiv="Cache-control" content-"public">
+<meta http-equiv="Cache-control" content="public">
   <style>
     html, body {
       margin: 0;
@@ -20,31 +20,54 @@
   </style>
   <script>
     var port = "9001" ;
+    var currentURL = "";
 
     function setNewImage(url) {
+      if (url === currentURL) {
+          console.log("Same image; not changing display");
+          return;
+      }
+      currentURL = url;
       console.log("url: " + url);
       img = document.getElementById("display");
       img.src = url;
     }
 
-    async function connectToPhotoServer() {
+    function sleep(ms) {
+      return new Promise(resolve => setTimeout(resolve, ms));
+	}
+
+    async function fetchURL() {
       while (true) {
         console.log("Starting fetch");
         await fetch("http://localhost:" + port + "/status")
           .then(function(response) {
                   return response.text();
-                })
+                }
+          )
           .then(function(data) {
                   console.log("New URL: " + data);
                   setNewImage(data);
-                });
+                }
+          );
+      }
+    }
+
+    async function connectToPhotoServer() {
+      while (true) {
+        try {
+            await fetchURL();
+        } catch(err) {
+          console.log("PhotoServer not available; sleeping 10 seconds");
+          await sleep(10000);
+        }
       }
     }
   </script>
 </head>
 <body onload="connectToPhotoServer();">
 <div class="imgcontainer">
-  <img class="display" id="display" src="" />
+  <img class="display" id="display" src="" alt="display"/>
 </div>
 </body>
 </html>
