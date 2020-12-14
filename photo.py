@@ -204,6 +204,7 @@ class ImageManager(object):
     def on_timer_expired(self):
         info("Timer Expired")
 #        self.check_webbrowser()
+        self._register(heartbeat=True)
         self.check_webserver()
         self.navigate()
 
@@ -316,11 +317,11 @@ class ImageManager(object):
         self.reg_url = safe_get("host", "reg_url")
         if not self.reg_url:
             error("No registration URL in photo.cfg; exiting")
-            exit()
+            sys.exit()
         self.dl_url = safe_get("host", "dl_url")
         if not self.dl_url:
             error("No download URL configured in photo.cfg; exiting")
-            exit()
+            sys.exit()
         self.interval = _normalize_interval(self.interval_time, self.interval_units)
         self.set_image_interval()
         self._in_read_config = False
@@ -331,7 +332,7 @@ class ImageManager(object):
             return
         self.set_timer()
 
-    def _register(self):
+    def _register(self, heartbeat=False):
         headers = {"user-agent": "photoviewer"}
         # Get free disk space
         freespace = get_freespace()
@@ -342,6 +343,9 @@ class ImageManager(object):
         resp = requests.post(self.reg_url, data=data, headers=headers)
         if 200 <= resp.status_code <= 299:
             # Success!
+            if heartbeat:
+                # Just need to ping the server and not update config
+                return
             pkid, images = resp.json()
             if pkid != self.pkid:
                 self.parser.set("frame", "pkid", pkid)
@@ -351,7 +355,7 @@ class ImageManager(object):
             random.shuffle(self.image_list)
         else:
             error(resp.status_code, resp.text)
-            exit()
+            sys.exit()
 
     @staticmethod
     def check_webbrowser():
