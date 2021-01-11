@@ -8,6 +8,7 @@ import signal
 import socketserver
 from threading import Thread, Timer
 import time
+import urllib.parse
 
 import requests
 
@@ -422,6 +423,7 @@ class ImageManager(object):
             if elapsed:
                 info("Elapsed time:", utils.human_time(elapsed))
         info("Showing photo", fname)
+#        self.photo_url = self.last_url = urllib.parse.quote_plus(os.path.join(self.dl_url, fname))
         self.photo_url = self.last_url = os.path.join(self.dl_url, fname)
 
     def get_url(self):
