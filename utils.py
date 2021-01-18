@@ -1,7 +1,9 @@
+import configparser
 import functools
 import inspect
 import json
 import logging
+import os
 import six
 from six.moves import StringIO
 import socket
@@ -10,20 +12,32 @@ import time
 
 import etcd3
 from etcd3 import exceptions as etcd_exceptions
+import pudb
 import tenacity
 
 
+APPDIR = os.path.expanduser("~/projects/photoviewer")
+CONFIG_FILE = os.path.join(APPDIR, "photo.cfg")
+HEARTBEAT_FLAG_FILE = "/tmp/PHOTOVIEWER.heartbeat"
+
 LOG = None
-LOG_FILE = None
 LOG_LEVEL = logging.INFO
+LOG_DIR = os.path.join(APPDIR, "log")
+# Make sure that all the necessary directories exist.
+for pth in (APPDIR, LOG_DIR):
+    os.makedirs(pth, exist_ok=True)
+LOG_FILE = os.path.join(LOG_DIR, "photo.log")
+
 MINUTE_SECS = 60
 HOUR_SECS = MINUTE_SECS * 60
 DAY_SECS = HOUR_SECS * 24
 RETRY_INTERVAL = 5
 etcd_client = None
+BASE_KEY = "/{pkid}:"
 
 
-class EtcdConnectionError(Exception): pass
+class EtcdConnectionError(Exception):
+    pass
 
 
 def logit(level, *msgs):
@@ -51,7 +65,6 @@ def enc(val):
 
 
 def trace():
-    import pudb
     pudb.set_trace()
 
 
@@ -79,6 +92,39 @@ def human_time(seconds):
     elif minutes:
         return f"{int(minutes)}m, {seconds}s"
     return f"{seconds}s"
+
+
+def parse_config_file():
+    parser = configparser.ConfigParser()
+    try:
+        parser.read(CONFIG_FILE)
+    except configparser.MissingSectionHeaderError as e:
+        # The file exists, but doesn't have the correct format.
+        raise Exception("Invalid Configuration File")
+    return parser
+
+
+def safe_get(parser, section, option, default=None):
+    try:
+        return parser.get(section, option)
+    except (configparser.NoSectionError, configparser.NoOptionError):
+        return default
+
+
+def set_heartbeat_flag():
+    with open(HEARTBEAT_FLAG_FILE, "w"):
+        pass
+
+
+def clear_heartbeat_flag(val=None):
+    if os.path.exists(HEARTBEAT_FLAG_FILE):
+        os.unlink(HEARTBEAT_FLAG_FILE)
+
+
+def normalize_interval(time_, units):
+    unit_key = units[0].lower()
+    factor = {"s": 1, "m": 60, "h": 3600, "d": 86400}.get(unit_key, 1)
+    return time_ * factor
 
 
 @tenacity.retry(wait=tenacity.wait_exponential())
@@ -160,8 +206,10 @@ def check_browser():
 
 
 def start_browser(url):
-    cmd = ("chromium-browser --kiosk --ignore-certificate-errors "
-        f"--disable-restore-session-state {url}")
+    cmd = (
+        "chromium-browser --kiosk --ignore-certificate-errors "
+        f"--disable-restore-session-state {url}"
+    )
     info(f"Starting webbrowser with command: {cmd}")
     out, err = runproc(cmd)
     info(f"Result: {out}. Error: {err}")
@@ -201,7 +249,8 @@ def log_point(msg="", levels=None):
     if msg:
         output.write(ustr(msg) + "\n")
 
-    stackSection = stack[-1*levels:]
+    start_level = -1 * levels
+    stackSection = stack[start_level:]
     for stackLine in stackSection:
         frame, filename, line, funcname, lines, unknown = stackLine
         if filename.endswith("/unittest.py"):

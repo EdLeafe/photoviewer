@@ -37,7 +37,7 @@ def adjust(img_file, bright, contrast, saturation):
         img = enhancer.enhance(float(saturation))
         logit("debug", "Finished adjusting saturation for image '%s'" % img_name)
     logit("debug", "Saving image '%s'" % img_name)
-    img.save(img_file, format='JPEG', subsampling=0, quality=95)
+    img.save(img_file, format="JPEG", subsampling=0, quality=95)
     gc.collect()
     logit("debug", "Finished saving image '%s'" % img_name)
     logit("info", "Finished corrections for image '%s'" % img_name)

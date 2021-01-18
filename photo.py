@@ -13,17 +13,8 @@ import urllib.parse
 import requests
 
 import utils
-from utils import debug, enc, error, info, runproc
+from utils import debug, enc, error, info, runproc, BASE_KEY, CONFIG_FILE
 
-APPDIR = os.path.expanduser("~/projects/photoviewer")
-LOG_DIR = os.path.join(APPDIR, "log")
-# Make sure that all the necessary directories exist.
-for pth in (APPDIR, LOG_DIR):
-    os.makedirs(pth, exist_ok=True)
-utils.set_log_file(os.path.join(LOG_DIR, "photo.log"))
-
-CONFIG_FILE = os.path.join(APPDIR, "photo.cfg")
-BASE_KEY = "/{pkid}:"
 MONITOR_CMD = "echo 'on 0' | /usr/bin/cec-client -s -d 1"
 BROWSER_CYCLE = 60
 
@@ -55,12 +46,6 @@ def clean_fb(pth):
     fb = fb_path(pth)
     if os.path.exists(fb):
         os.unlink(fb)
-
-
-def _normalize_interval(time_, units):
-    unit_key = units[0].lower()
-    factor = {"s": 1, "m": 60, "h": 3600, "d": 86400}.get(unit_key, 1)
-    return time_ * factor
 
 
 def get_freespace():
@@ -111,7 +96,6 @@ class ImageManager(object):
         self.timer_start = None
         self.photo_url = ""
         self.last_url = ""
-        self.parser = configparser.ConfigParser()
         self._read_config()
         self.initial_interval = self._set_start()
         self._set_power_on()
@@ -123,7 +107,7 @@ class ImageManager(object):
         self.start_server()
 
     def start(self):
-#        self.check_webbrowser()
+        #        self.check_webbrowser()
         self._set_signals()
         self.set_timer()
         self._started = True
@@ -204,7 +188,6 @@ class ImageManager(object):
 
     def on_timer_expired(self):
         info("Timer Expired")
-#        self.check_webbrowser()
         self._register(heartbeat=True)
         self.check_webserver()
         self.navigate()
@@ -237,7 +220,8 @@ class ImageManager(object):
         self.navigate()
 
     def process_event(self, key, val):
-        debug("process_event called")
+        debug("process_event called; clearing heartbeat flag")
+        utils.clear_heartbeat_flag()
         actions = {
             "power_state": self._set_power_state,
             "change_photo": self._change_photo,
@@ -265,19 +249,9 @@ class ImageManager(object):
             return
         self._in_read_config = True
         info("_read_config called!")
-        try:
-            self.parser.read(CONFIG_FILE)
-        except configparser.MissingSectionHeaderError as e:
-            # The file exists, but doesn't have the correct format.
-            raise exc.InvalidConfigurationFile(e)
+        parser = utils.parse_config_file()
 
-        def safe_get(section, option, default=None):
-            try:
-                return self.parser.get(section, option)
-            except (configparser.NoSectionError, configparser.NoOptionError):
-                return default
-
-        self.pkid = safe_get("frame", "pkid")
+        self.pkid = utils.safe_get(parser, "frame", "pkid")
         self.watch_key = BASE_KEY.format(pkid=self.pkid)
         settings_key = "{}settings".format(self.watch_key)
         settings = utils.read_key(settings_key)
@@ -315,15 +289,15 @@ class ImageManager(object):
             self.saturation = 1.0
 
         utils.set_log_level(self.log_level)
-        self.reg_url = safe_get("host", "reg_url")
+        self.reg_url = utils.safe_get(parser, "host", "reg_url")
         if not self.reg_url:
             error("No registration URL in photo.cfg; exiting")
             sys.exit()
-        self.dl_url = safe_get("host", "dl_url")
+        self.dl_url = utils.safe_get(parser, "host", "dl_url")
         if not self.dl_url:
             error("No download URL configured in photo.cfg; exiting")
             sys.exit()
-        self.interval = _normalize_interval(self.interval_time, self.interval_units)
+        self.interval = utils.normalize_interval(self.interval_time, self.interval_units)
         self.set_image_interval()
         self._in_read_config = False
 
@@ -334,6 +308,10 @@ class ImageManager(object):
         self.set_timer()
 
     def _register(self, heartbeat=False):
+        if heartbeat:
+            # Set the heartbeat flag
+            debug("Setting heartbeat file...")
+            utils.set_heartbeat_flag()
         headers = {"user-agent": "photoviewer"}
         # Get free disk space
         freespace = get_freespace()
@@ -344,14 +322,12 @@ class ImageManager(object):
         resp = requests.post(self.reg_url, data=data, headers=headers)
         if 200 <= resp.status_code <= 299:
             # Success!
-            if heartbeat:
-                # Just need to ping the server and not update config
-                return
             pkid, images = resp.json()
             if pkid != self.pkid:
-                self.parser.set("frame", "pkid", pkid)
+                parser = utils.parse_config_file()
+                parser.set("frame", "pkid", pkid)
                 with open(CONFIG_FILE, "w") as ff:
-                    self.parser.write(ff)
+                    parser.write(ff)
             self.image_list = images
             random.shuffle(self.image_list)
         else:
@@ -423,7 +399,7 @@ class ImageManager(object):
             if elapsed:
                 info("Elapsed time:", utils.human_time(elapsed))
         info("Showing photo", fname)
-#        self.photo_url = self.last_url = urllib.parse.quote_plus(os.path.join(self.dl_url, fname))
+        #        self.photo_url = self.last_url = urllib.parse.quote_plus(os.path.join(self.dl_url, fname))
         self.photo_url = self.last_url = os.path.join(self.dl_url, fname)
 
     def get_url(self):
@@ -438,6 +414,7 @@ class ImageManager(object):
     def _update_config(self, data):
         changed = False
         new_interval = False
+        parser = utils.parse_config_file()
         if "log_level" in data:
             self.log_level = data["log_level"]
             utils.set_log_level(self.log_level)
@@ -465,14 +442,14 @@ class ImageManager(object):
                 setattr(self, key, converted)
                 monitor_keys = ("brightness", "contrast", "saturation")
                 section = "monitor" if key in monitor_keys else "frame"
-                self.parser.set(section, key, str(val))
+                parser.set(section, key, str(val))
                 changed = True
                 new_interval = new_interval or "interval" in key
         if changed:
             with open(CONFIG_FILE, "w") as ff:
-                self.parser.write(ff)
+                parser.write(ff)
         if new_interval:
-            self.interval = _normalize_interval(self.interval_time, self.interval_units)
+            self.interval = utils.normalize_interval(self.interval_time, self.interval_units)
             info("Setting timer to", self.interval)
             self.set_image_interval()
 
