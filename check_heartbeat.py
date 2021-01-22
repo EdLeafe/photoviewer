@@ -1,6 +1,8 @@
 import configparser
+import datetime
 import os
 from subprocess import Popen, PIPE
+import sys
 import time
 
 HOMEDIR = os.path.expanduser("~")
@@ -8,10 +10,13 @@ APPDIR = os.path.join(HOMEDIR, "projects/photoviewer")
 CONFIG_FILE = os.path.join(APPDIR, "photo.cfg")
 HEARTBEAT_FLAG_FILE = "/tmp/PHOTOVIEWER.heartbeat"
 PARSER = configparser.ConfigParser()
-RESTART_COMMAND = (
-    f"cd {APPDIR}; kill -9 `cat photo.pid`; source {HOMEDIR}/venvs/viewer/bin/activate; "
-    f"python photo.py & ; rm -f {HEARTBEAT_FLAG_FILE}"
-)
+if sys.platform == "darwin":
+    RESTART_COMMAND = (
+        f"cd {APPDIR}; kill -9 `cat photo.pid`; source {HOMEDIR}/venvs/viewer/bin/activate; "
+        f"python photo.py & ; rm -f {HEARTBEAT_FLAG_FILE}"
+    )
+else:
+    RESTART_COMMAND = "sudo systemctl restart photoviewer.service"
 
 
 def runproc(cmd, wait=True):
@@ -65,14 +70,20 @@ def restart():
     runproc(RESTART_COMMAND)
 
 
+def printit(txt):
+    tm = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with open("/home/pi/projects/photoviewer/log/heartbeat.log", "a") as ff:
+        ff.write(f"{tm} {txt}\n")
+
+
 def main():
     elapsed = since_heartbeat()
     interval = get_interval()
     if elapsed > (2 * interval):
-        print("RESTARTING!")
+        printit("RESTARTING!")
         restart()
     else:
-        print("Cool")
+        printit(f"Cool - elapsed = {elapsed}, interval = {interval}")
 
 
 if __name__ == "__main__":

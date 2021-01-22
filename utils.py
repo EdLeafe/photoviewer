@@ -218,7 +218,7 @@ def start_browser(url):
 def _setup_logging():
     global LOG
     LOG = logging.getLogger("photo")
-    hnd = logging.FileHandler(LOG_FILE or "logit.log")
+    hnd = logging.FileHandler(LOG_FILE or "temp_logit.log")
     formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
     hnd.setFormatter(formatter)
     LOG.addHandler(hnd)

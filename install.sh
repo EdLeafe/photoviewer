@@ -19,6 +19,13 @@ sudo cp photoviewer.service /lib/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable photoviewer
 
+# Create the cron jobs to run the heartbeat check script
+command="# Run the heartbeat check every 10 minutes"
+cat <(fgrep -i -v "$command" <(crontab -l)) <(echo "$command") | crontab -
+command="cd /home/pi/projects/photoviewer; python3 check_heartbeat.py"
+job="*/10 * * * * $command"
+cat <(fgrep -i -v "$command" <(crontab -l)) <(echo "$job") | crontab -
+
 # Create the cron jobs to turn the monitor on/off
 command="# Turn monitor off at 11pm"
 cat <(fgrep -i -v "$command" <(crontab -l)) <(echo "$command") | crontab -
