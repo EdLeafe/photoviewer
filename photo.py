@@ -6,6 +6,7 @@ import os
 import random
 import signal
 import socketserver
+import sys
 from threading import Thread, Timer
 import time
 import urllib.parse
@@ -28,7 +29,8 @@ def swapext(pth, ext):
     ext = ext.lstrip(".")
     dirname = os.path.dirname(pth)
     basename = os.path.basename(pth)
-    newname = "%s.%s" % (os.path.splitext(basename)[0], ext)
+    newname = f"{os.path.splitext(basename)[0]}.{ext}"
+
     return os.path.join(dirname, newname)
 
 
@@ -118,7 +120,7 @@ class ImageManager(object):
         """Listen for changes on the key for this host."""
         debug("Entering main loop; watching", self.watch_key)
         # Sometimes the first connection can be very slow - around 2 minutes!
-        power_key = "{}power_state".format(self.watch_key)
+        power_key = f"{self.watch_key}power_state"
         debug("Power key:", power_key)
         power_state = utils.read_key(power_key)
         debug("Power State:", power_state)
@@ -178,9 +180,12 @@ class ImageManager(object):
         if self.photo_timer:
             self.photo_timer.cancel()
         self.photo_timer = Timer(interval, self.on_timer_expired)
-        debug("Timer {} created with interval {}".format(id(self.photo_timer), interval))
+        debug(f"Timer {id(self.photo_timer)} created with interval {interval}")
         next_change = datetime.datetime.now() + datetime.timedelta(seconds=interval)
-        info("Next photo change scheduled for {}".format(next_change.strftime("%H:%M:%S")))
+        info(
+            f"New interval: {utils.human_time(interval)}. Next photo change scheduled for "
+            f"{next_change.strftime('%H:%M:%S')}"
+        )
         if start:
             self.photo_timer.start()
             self.timer_start = time.time()
@@ -211,7 +216,7 @@ class ImageManager(object):
 
     def _set_settings(self, val):
         """The parameter 'val' will be a dict in the format of:
-            setting name: setting value
+        setting name: setting value
         """
         self._update_config(val)
 
@@ -220,7 +225,7 @@ class ImageManager(object):
         self.navigate()
 
     def process_event(self, key, val):
-        debug("process_event called; clearing heartbeat flag")
+        info("process_event called; clearing heartbeat flag")
         utils.clear_heartbeat_flag()
         actions = {
             "power_state": self._set_power_state,
@@ -228,7 +233,7 @@ class ImageManager(object):
             "settings": self._set_settings,
             "images": self._set_images,
         }
-        info("Received key: {key} and val: {val}".format(key=key, val=val))
+        info(f"Received key: {key} and val: {val}")
         mthd = actions.get(key)
         if not mthd:
             error("Unknown action received:", key, val)
@@ -253,7 +258,7 @@ class ImageManager(object):
 
         self.pkid = utils.safe_get(parser, "frame", "pkid")
         self.watch_key = BASE_KEY.format(pkid=self.pkid)
-        settings_key = "{}settings".format(self.watch_key)
+        settings_key = f"{self.watch_key}settings"
         settings = utils.read_key(settings_key)
         if settings:
             self.log_level = settings.get("log_level", "INFO")
@@ -297,7 +302,9 @@ class ImageManager(object):
         if not self.dl_url:
             error("No download URL configured in photo.cfg; exiting")
             sys.exit()
-        self.interval = utils.normalize_interval(self.interval_time, self.interval_units)
+        self.interval = utils.normalize_interval(
+            self.interval_time, self.interval_units
+        )
         self.set_image_interval()
         self._in_read_config = False
 
@@ -310,7 +317,7 @@ class ImageManager(object):
     def _register(self, heartbeat=False):
         if heartbeat:
             # Set the heartbeat flag
-            debug("Setting heartbeat file...")
+            info("Setting heartbeat file...")
             utils.set_heartbeat_flag()
         headers = {"user-agent": "photoviewer"}
         # Get free disk space
@@ -449,7 +456,9 @@ class ImageManager(object):
             with open(CONFIG_FILE, "w") as ff:
                 parser.write(ff)
         if new_interval:
-            self.interval = utils.normalize_interval(self.interval_time, self.interval_units)
+            self.interval = utils.normalize_interval(
+                self.interval_time, self.interval_units
+            )
             info("Setting timer to", self.interval)
             self.set_image_interval()
 
@@ -462,7 +471,7 @@ class ImageManager(object):
 
 if __name__ == "__main__":
     with open("photo.pid", "w") as ff:
-        ff.write("%s" % os.getpid())
+        ff.write(f"{os.getpid()}")
     img_mgr = ImageManager()
     try:
         debug("And we're off!")

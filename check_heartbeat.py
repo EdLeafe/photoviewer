@@ -8,7 +8,8 @@ import time
 HOMEDIR = os.path.expanduser("~")
 APPDIR = os.path.join(HOMEDIR, "projects/photoviewer")
 CONFIG_FILE = os.path.join(APPDIR, "photo.cfg")
-HEARTBEAT_FLAG_FILE = "/tmp/PHOTOVIEWER.heartbeat"
+HEARTBEAT_FLAG_FILE = os.path.join(APPDIR, "HEARTBEAT")
+NO_FILE_FLAG = -1
 PARSER = configparser.ConfigParser()
 if sys.platform == "darwin":
     RESTART_COMMAND = (
@@ -59,15 +60,21 @@ def get_interval():
 
 def since_heartbeat():
     if not os.path.exists(HEARTBEAT_FLAG_FILE):
-        return -1
+        return NO_FILE_FLAG
     info = os.stat(HEARTBEAT_FLAG_FILE)
     local_time = time.localtime(info.st_atime)
     last_access = time.mktime(local_time)
     return time.time() - last_access
 
 
+def clear_heartbeat_flag():
+    if os.path.exists(HEARTBEAT_FLAG_FILE):
+        os.unlink(HEARTBEAT_FLAG_FILE)
+
+
 def restart():
     runproc(RESTART_COMMAND)
+    clear_heartbeat_flag()
 
 
 def printit(txt):
@@ -78,12 +85,15 @@ def printit(txt):
 
 def main():
     elapsed = since_heartbeat()
+    if elapsed == NO_FILE_FLAG:
+        printit("Cool")
+        return
     interval = get_interval()
-    if elapsed > (2 * interval):
+    if elapsed > (1.5 * interval):
         printit("RESTARTING!")
         restart()
     else:
-        printit(f"Cool - elapsed = {elapsed}, interval = {interval}")
+        printit(f"Elapsed = {elapsed}, Interval = {interval}")
 
 
 if __name__ == "__main__":

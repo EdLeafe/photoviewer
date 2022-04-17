@@ -18,7 +18,7 @@ import tenacity
 
 APPDIR = os.path.expanduser("~/projects/photoviewer")
 CONFIG_FILE = os.path.join(APPDIR, "photo.cfg")
-HEARTBEAT_FLAG_FILE = "/tmp/PHOTOVIEWER.heartbeat"
+HEARTBEAT_FLAG_FILE = os.path.join(APPDIR, "HEARTBEAT")
 
 LOG = None
 LOG_LEVEL = logging.INFO
@@ -43,7 +43,7 @@ class EtcdConnectionError(Exception):
 def logit(level, *msgs):
     if not LOG:
         _setup_logging()
-    text = " ".join(["%s" % msg for msg in msgs])
+    text = " ".join([f"{msg}" for msg in msgs])
     log_method = getattr(LOG, level)
     log_method(text)
 
@@ -175,9 +175,10 @@ def watch(prefix, callback):
                 info("FAILED TO GET CLIENT; SLEEPING...")
                 time.sleep(RETRY_INTERVAL)
         try:
-            debug("WATCHING PREFIX '{}'".format(prefix))
+            debug(f"WATCHING PREFIX '{prefix}'")
             event = clt.watch_prefix_once(prefix, timeout=30)
-            info("GOT Event", type(event), event)
+            info("Got etcd event")
+            debug("Event", type(event), event)
             # Make sure it isn't a connection event
             if not hasattr(event, "key"):
                 error(str(event))
@@ -258,9 +259,9 @@ def log_point(msg="", levels=None):
             continue
         if filename.startswith("./"):
             filename = filename[2:]
-        output.write("%s:%s in %s:\n" % (filename, line, funcname))
+        output.write(f"{filename}:{line} in {funcname}:\n")
         if lines:
-            output.write("    %s\n" % "".join(lines)[:-1])
+            output.write("    {" ".join(lines)[:-1]}\n")
     s = output.getvalue()
     # I actually logged the result, but you could also print it:
     return s

@@ -39,6 +39,12 @@ command="echo 'on 0' | /usr/bin/cec-client -s -d 1"
 job="15 6 * * * $command"
 cat <(fgrep -i -v "$command" <(crontab -l)) <(echo "$job") | crontab -
 
+command="# Turn off monitor after logrotate restart every Sunday"
+cat <(fgrep -i -v "$command" <(crontab -l)) <(echo "$command") | crontab -
+command="echo 'standby 0' | /usr/bin/cec-client -s -d 1"
+job="2 0 * * 7 $command"
+cat <(fgrep -i -v "$command" <(crontab -l)) <(echo "$job") | crontab -
+
 # Set up the config file
 cp photo.cfg.template photo.cfg
 UUID=$(cat /proc/sys/kernel/random/uuid)
