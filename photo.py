@@ -224,6 +224,11 @@ class ImageManager(object):
         self.image_list = val
         self.navigate()
 
+    def _reboot(self, val):
+        cmd = "/usr/bin/sudo reboot now"
+        info("reboot called")
+        runproc(cmd, wait=False)
+
     def process_event(self, key, val):
         info("process_event called; clearing heartbeat flag")
         utils.clear_heartbeat_flag()
@@ -232,6 +237,7 @@ class ImageManager(object):
             "change_photo": self._change_photo,
             "settings": self._set_settings,
             "images": self._set_images,
+            "reboot": self._reboot,
         }
         info(f"Received key: {key} and val: {val}")
         mthd = actions.get(key)
