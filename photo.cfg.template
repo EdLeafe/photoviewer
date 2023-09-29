@@ -7,6 +7,7 @@ pkid = PKID
 name = FRAMENAME
 description = FRAMEDESC
 orientation = horizontal
+halflife_interval = 0
 interval_base = *:*
 interval_time = 1
 interval_units = hours

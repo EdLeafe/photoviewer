@@ -18,6 +18,8 @@ from utils import debug, enc, error, info, runproc, BASE_KEY, CONFIG_FILE
 
 MONITOR_CMD = "echo 'on 0' | /usr/bin/cec-client -s -d 1"
 BROWSER_CYCLE = 60
+# Used to weigh the odds of halflife expiring
+HALFLIFE_FACTOR = 0.67
 
 PORT = 9001
 
@@ -98,6 +100,7 @@ class ImageManager(object):
         self.timer_start = None
         self.photo_url = ""
         self.last_url = ""
+        self._show_start = None
         self._read_config()
         self.initial_interval = self._set_start()
         self._set_power_on()
@@ -174,28 +177,60 @@ class ImageManager(object):
         offset_secs = offset.total_seconds()
         return offset_secs if offset_secs > 0 else 0
 
+    def _calc_interval(self):
+        if self.use_halflife:
+            # Check every minute
+            debug(
+                f"Halflife interval of {self.interval} seconds; setting check in 60 seconds"
+            )
+            return 60
+        else:
+            diff = self.interval * (self.variance_pct / 100)
+            return round(random.uniform(self.interval - diff, self.interval + diff))
+
     def set_timer(self, start=True):
-        diff = self.interval * (self.variance_pct / 100)
-        interval = round(random.uniform(self.interval - diff, self.interval + diff))
+        interval = self._calc_interval()
         if self.photo_timer:
             self.photo_timer.cancel()
         self.photo_timer = Timer(interval, self.on_timer_expired)
-        debug(f"Timer {id(self.photo_timer)} created with interval {interval}")
-        next_change = datetime.datetime.now() + datetime.timedelta(seconds=interval)
-        info(
-            f"New interval: {utils.human_time(interval)}. Next photo change scheduled for "
-            f"{next_change.strftime('%H:%M:%S')}"
+        debug(
+            f"{'Halflife' if self.use_halflife else 'Variance'} timer {id(self.photo_timer)} "
+            f"created with interval {interval}"
         )
+        if not self.use_halflife:
+            next_change = datetime.datetime.now() + datetime.timedelta(seconds=interval)
+            info(
+                f"New interval: {utils.human_time(interval)}. Next photo change scheduled for "
+                f"{next_change.strftime('%H:%M:%S')}"
+            )
         if start:
             self.photo_timer.start()
             self.timer_start = time.time()
-            info("Timer started")
+            log_mthd = debug if self.use_halflife else info
+            log_mthd("Timer started")
 
     def on_timer_expired(self):
-        info("Timer Expired")
+        log_mthd = debug if self.use_halflife else info
+        log_mthd("Timer Expired")
+        if self.use_halflife:
+            return self.check_halflife_expired()
+        self.reset_timer()
+
+    def reset_timer(self):
         self._register(heartbeat=True)
         self.check_webserver()
         self.navigate()
+
+    def check_halflife_expired(self):
+        interval_minutes = self.interval / 60
+        threshold = HALFLIFE_FACTOR / interval_minutes
+        rand_num = random.random()
+        info(f"Halflife threshold: {threshold}; val: {rand_num}")
+        if rand_num < threshold:
+            # Halflife triggered!
+            self.reset_timer()
+        else:
+            self.set_timer()
 
     def _set_signals(self):
         signal.signal(signal.SIGHUP, self._read_config)
@@ -279,6 +314,8 @@ class ImageManager(object):
             self.interval_units = settings.get("interval_units", "minutes")
             # Percentage to vary the display time from photo to photo
             self.variance_pct = int(settings.get("variance_pct", 0))
+            # Do we use halflife decay pattern for the interval?
+            self.use_halflife = bool(settings.get("use_halflife", False))
             self.brightness = settings.get("brightness", 1.0)
             self.contrast = settings.get("contrast", 1.0)
             self.saturation = settings.get("saturation", 1.0)
@@ -295,6 +332,8 @@ class ImageManager(object):
             self.interval_units = "minutes"
             # Percentage to vary the display time from photo to photo
             self.variance_pct = 0
+            # Do we use halflife decay pattern for the interval?
+            self.use_halflife = False
             self.brightness = 1.0
             self.contrast = 1.0
             self.saturation = 1.0
@@ -359,7 +398,7 @@ class ImageManager(object):
             self.start_server()
 
     def navigate(self, signum=None, forward=True, frame=None):
-        """Moves to the next image. """
+        """Moves to the next image."""
         debug("navigate called; current index", self.image_index)
 
         num_images = len(self.image_list)
@@ -412,6 +451,13 @@ class ImageManager(object):
             if elapsed:
                 info("Elapsed time:", utils.human_time(elapsed))
         info("Showing photo", fname)
+        if self._show_start:
+            elapsed = datetime.datetime.now() - self._show_start
+            info(
+                f"Halflife: changing photo after {utils.human_time(elapsed.seconds)} seconds; "
+                f"halflife={utils.human_time(self.interval)}"
+            )
+        self._show_start = datetime.datetime.now()
         #        self.photo_url = self.last_url = urllib.parse.quote_plus(os.path.join(self.dl_url, fname))
         self.photo_url = self.last_url = os.path.join(self.dl_url, fname)
 
