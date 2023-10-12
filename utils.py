@@ -4,6 +4,7 @@ import inspect
 import json
 import logging
 import os
+import re
 import six
 from six.moves import StringIO
 import socket
@@ -265,3 +266,14 @@ def log_point(msg="", levels=None):
     s = output.getvalue()
     # I actually logged the result, but you could also print it:
     return s
+
+
+def read_log(numlines, filter=None):
+    ret = []
+    filter = filter or ""
+    with open(LOG_FILE, "r") as ff:
+        lines = [line.strip() for line in ff.readlines() if filter in line]
+    lines.sort(reverse=True)
+    if numlines > 0:
+        lines = lines[:numlines]
+    return "\n".join(lines)

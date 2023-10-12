@@ -59,6 +59,22 @@ def get_freespace():
     return freespace
 
 
+def get_log_content(path):
+    parts = path.split("?")
+    line_count = 1000
+    term = ""
+    if len(parts) > 1:
+        qp = parts[1]
+        qparts = qp.split("&")
+        for qpart in qparts:
+            key, val = qpart.split("=")
+            if key == "size":
+                line_count = int(val)
+            elif key == "filter":
+                term = val
+    return f"<pre>{utils.read_log(line_count, term)}</pre>"
+
+
 def run_webserver(mgr):
     with socketserver.TCPServer(("", PORT), PhotoHandler) as httpd:
         httpd.mgr = mgr
@@ -68,6 +84,7 @@ def run_webserver(mgr):
 
 class PhotoHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
+        debug(f"do_GET called; path={self.path}")
         if self.path == "/status":
             mgr = self.server.mgr
             url = mgr.get_url()
@@ -81,8 +98,14 @@ class PhotoHandler(http.server.SimpleHTTPRequestHandler):
             mgr.clear_url()
             self.send_response(200)
             self.end_headers()
-            debug("Writing photo URL to browser")
+            debug(f"Writing photo URL to browser: {url}")
             self.wfile.write(enc(url))
+        elif self.path.startswith("/log"):
+            debug("Log called!")
+            self.send_response(200)
+            self.end_headers()
+            content = get_log_content(self.path)
+            self.wfile.write(enc(content))
         else:
             with open("main.html") as ff:
                 html = ff.read()
@@ -225,7 +248,7 @@ class ImageManager(object):
         interval_minutes = self.interval / 60
         threshold = HALFLIFE_FACTOR / interval_minutes
         rand_num = random.random()
-        info(f"Halflife threshold: {threshold}; val: {rand_num}")
+        debug(f"Halflife threshold: {threshold}; val: {rand_num}")
         if rand_num < threshold:
             # Halflife triggered!
             self.reset_timer()

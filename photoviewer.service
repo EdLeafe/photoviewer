@@ -3,12 +3,12 @@ Description=Photoviewer application
 After=network.target
 
 [Service]
-User=pi
-Group=pi
-WorkingDirectory=/home/pi/projects/photoviewer
+User=ed
+Group=ed
+WorkingDirectory=/home/ed/projects/photoviewer
 Environment=
-Environment="PATH=/home/pi/venvs/photo/bin"
-ExecStart=/home/pi/venvs/photo/bin/python3 /home/pi/projects/photoviewer/photo.py
+Environment="PATH=/home/ed/venvs/photo/bin"
+ExecStart=/home/ed/venvs/photo/bin/python3 /home/ed/projects/photoviewer/photo.py
 Restart=always    
 RestartSec=3
 
