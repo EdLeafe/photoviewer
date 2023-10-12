@@ -1,7 +1,5 @@
-Pillow
 black
 etcd3
 ipython
 pytest-pudb
-requests
-tenacity
+httpx

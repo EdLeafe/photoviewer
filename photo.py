@@ -11,8 +11,9 @@ from threading import Thread, Timer
 import time
 import urllib.parse
 
-import requests
+import httpx
 
+from assets import AssetManager
 import utils
 from utils import debug, enc, error, info, runproc, BASE_KEY, CONFIG_FILE
 
@@ -118,6 +119,7 @@ class PhotoHandler(http.server.SimpleHTTPRequestHandler):
 class ImageManager(object):
     def __init__(self):
         self._started = False
+        self.asset_manger = AssetManager()
         self._in_read_config = False
         self.photo_timer = None
         self.timer_start = None
@@ -132,7 +134,8 @@ class ImageManager(object):
         self.displayed_name = ""
         self.image_index = 0
         self._register()
-        self.start_server()
+
+    #         self.start_server()
 
     def start(self):
         #        self.check_webbrowser()
@@ -203,9 +206,7 @@ class ImageManager(object):
     def _calc_interval(self):
         if self.use_halflife:
             # Check every minute
-            debug(
-                f"Halflife interval of {self.interval} seconds; setting check in 60 seconds"
-            )
+            debug(f"Halflife interval of {self.interval} seconds; setting check in 60 seconds")
             return 60
         else:
             diff = self.interval * (self.variance_pct / 100)
@@ -370,9 +371,7 @@ class ImageManager(object):
         if not self.dl_url:
             error("No download URL configured in photo.cfg; exiting")
             sys.exit()
-        self.interval = utils.normalize_interval(
-            self.interval_time, self.interval_units
-        )
+        self.interval = utils.normalize_interval(self.interval_time, self.interval_units)
         self.set_image_interval()
         self._in_read_config = False
 
@@ -394,7 +393,7 @@ class ImageManager(object):
             "pkid": self.pkid,
             "freespace": freespace,
         }
-        resp = requests.post(self.reg_url, data=data, headers=headers)
+        resp = httpx.post(self.reg_url, data=data, headers=headers)
         if 200 <= resp.status_code <= 299:
             # Success!
             pkid, images = resp.json()
@@ -405,6 +404,7 @@ class ImageManager(object):
                     parser.write(ff)
             self.image_list = images
             random.shuffle(self.image_list)
+            self.asset_manger.add_assets(self.image_list)
         else:
             error(resp.status_code, resp.text)
             sys.exit()
@@ -481,8 +481,15 @@ class ImageManager(object):
                 f"halflife={utils.human_time(self.interval)}"
             )
         self._show_start = datetime.datetime.now()
-        #        self.photo_url = self.last_url = urllib.parse.quote_plus(os.path.join(self.dl_url, fname))
         self.photo_url = self.last_url = os.path.join(self.dl_url, fname)
+        # There can be delays, so retry this if it fails
+        tries = 5
+        while tries:
+            tries -= 1
+            if self.asset_manger.show(fname):
+                break
+            debug("Image show failed; waiting 10 seconds and retrying...")
+            time.sleep(10)
 
     def get_url(self):
         return self.photo_url
@@ -531,9 +538,7 @@ class ImageManager(object):
             with open(CONFIG_FILE, "w") as ff:
                 parser.write(ff)
         if new_interval:
-            self.interval = utils.normalize_interval(
-                self.interval_time, self.interval_units
-            )
+            self.interval = utils.normalize_interval(self.interval_time, self.interval_units)
             info("Setting timer to", self.interval)
             self.set_image_interval()
 
