@@ -476,12 +476,15 @@ class ImageManager(object):
         info("Showing photo", fname)
         if self._show_start:
             elapsed = datetime.datetime.now() - self._show_start
-            info(
-                f"Halflife: changing photo after {utils.human_time(elapsed.seconds)} seconds; "
-                f"halflife={utils.human_time(self.interval)}"
-            )
+            elapsed_display = utils.human_time(elapsed.seconds)
+            if self.use_halflife:
+                info(
+                    f"Halflife: changing photo after {elapsed_display} seconds; "
+                    f"halflife={utils.human_time(self.interval)}"
+                )
+            else:
+                info(f"Changing photo after {elapsed_display}")
         self._show_start = datetime.datetime.now()
-        #        self.photo_url = self.last_url = urllib.parse.quote_plus(os.path.join(self.dl_url, fname))
         self.photo_url = self.last_url = os.path.join(self.dl_url, fname)
 
     def get_url(self):
