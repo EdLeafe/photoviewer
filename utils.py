@@ -10,6 +10,7 @@ from six.moves import StringIO
 import socket
 from subprocess import Popen, PIPE
 import time
+import urllib
 
 import etcd3
 from etcd3 import exceptions as etcd_exceptions
@@ -103,6 +104,11 @@ def parse_config_file():
         # The file exists, but doesn't have the correct format.
         raise Exception("Invalid Configuration File")
     return parser
+
+
+def url_quote(url):
+    scheme, rest = url.split("://")
+    return f"{scheme}://{urllib.parse.quote(rest)}"
 
 
 def safe_get(parser, section, option, default=None):
@@ -209,8 +215,8 @@ def check_browser():
 
 def start_browser(url):
     cmd = (
-        "chromium-browser --kiosk --ignore-certificate-errors "
-        f"--disable-restore-session-state {url}"
+        "chromium-browser --kiosk --ignore-certificate-errors --check-for-update-interval=1 "
+        f"--simulate-critical-update --disable-restore-session-state {url}"
     )
     info(f"Starting webbrowser with command: {cmd}")
     out, err = runproc(cmd)

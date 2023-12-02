@@ -2,6 +2,9 @@ from datetime import datetime
 
 import httpx
 
+import utils
+from utils import debug
+
 
 def format_datetime(dt=None):
     dt = dt or datetime.now()
@@ -19,12 +22,17 @@ class AssetManager:
         self.image_uri = "https://com-leafe-images.nyc3.cdn.digitaloceanspaces.com/photoviewer"
 
     def list_assets(self):
+        debug(f"list_assets() GET {self.base_uri}")
         resp = httpx.get(self.base_uri)
-        return resp.json()
+        debug(f"list_assets() RESPONSE: {resp.status_code}")
+        content = resp.json()
+        debug(f"list_assets() RESPONSE: {content}")
+        return content
 
     def add_assets(self, assets):
         curr_names = [img["name"] for img in self.list_assets()]
         for name in [nm for nm in assets if nm not in curr_names]:
+            debug(f"Calling add_asset() with '{name}'.")
             self.add_asset(name)
 
     def add_asset(
@@ -32,14 +40,14 @@ class AssetManager:
         name,
         uri=None,
         enabled=False,
-        duration=1,
+        duration=10,
         active=False,
         processing=False,
         nocache=False,
         play_order=0,
         skip_asset_check=False,
     ):
-        uri = uri or f"{self.image_uri}/{name}"
+        uri = utils.url_quote(uri or f"{self.image_uri}/{name}")
         body = {
             "name": name,
             "uri": uri,
@@ -54,7 +62,10 @@ class AssetManager:
             "play_order": play_order,
             "skip_asset_check": (1 if skip_asset_check else 0),
         }
+        debug(f"add_asset() POST {uri}")
+        debug(f"add_asset() BODY: {body}")
         resp = httpx.post(self.base_uri, json=body)
+        debug(f"add_asset() RESPONSE: {resp.status_code}")
         return 200 <= resp.status_code < 300
 
     def show(self, name):
@@ -73,5 +84,8 @@ class AssetManager:
         uri = f"{self.base_uri}/{img_id}"
         val = 1 if active else 0
         body = {"is_active": val, "is_enabled": val}
+        debug(f"set_active() PATCH {uri}")
+        debug(f"set_active() BODY: {body}")
         resp = httpx.patch(uri, json=body)
+        debug(f"set_active() RESPONSE: {resp.status_code}")
         return 200 <= resp.status_code < 300

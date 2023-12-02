@@ -134,11 +134,12 @@ class ImageManager(object):
         self.displayed_name = ""
         self.image_index = 0
         self._register()
-
-    #         self.start_server()
+        if not self.use_anthias:
+            self.start_server()
 
     def start(self):
-        #        self.check_webbrowser()
+        if not self.use_anthias:
+            self.check_webbrowser()
         self._set_signals()
         self.set_timer()
         self._started = True
@@ -321,6 +322,7 @@ class ImageManager(object):
         info("_read_config called!")
         parser = utils.parse_config_file()
 
+        self.use_anthias = utils.safe_get(parser, "software", "handler", default="webserver") == "anthias"
         self.pkid = utils.safe_get(parser, "frame", "pkid")
         self.watch_key = BASE_KEY.format(pkid=self.pkid)
         settings_key = f"{self.watch_key}settings"
@@ -482,14 +484,15 @@ class ImageManager(object):
             )
         self._show_start = datetime.datetime.now()
         self.photo_url = self.last_url = os.path.join(self.dl_url, fname)
-        # There can be delays, so retry this if it fails
-        tries = 5
-        while tries:
-            tries -= 1
-            if self.asset_manger.show(fname):
-                break
-            debug("Image show failed; waiting 10 seconds and retrying...")
-            time.sleep(10)
+        if self.use_anthias:
+            # There can be delays, so retry this if it fails
+            tries = 5
+            while tries:
+                tries -= 1
+                if self.asset_manger.show(fname):
+                    break
+                debug("Image show failed; waiting 10 seconds and retrying...")
+                time.sleep(10)
 
     def get_url(self):
         return self.photo_url

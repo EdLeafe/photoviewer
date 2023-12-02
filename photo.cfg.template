@@ -12,6 +12,10 @@ interval_base = *:*
 interval_time = 1
 interval_units = hours
 log_level = INFO
+variance_pct = 0
+
+[software]
+handler = anthias
 
 [monitor]
 brightness = 1.0
