@@ -22,11 +22,11 @@ class AssetManager:
         self.image_uri = "https://com-leafe-images.nyc3.cdn.digitaloceanspaces.com/photoviewer"
 
     def list_assets(self):
-        debug(f"list_assets() GET {self.base_uri}")
+#         debug(f"list_assets() GET {self.base_uri}")
         resp = httpx.get(self.base_uri)
         debug(f"list_assets() RESPONSE: {resp.status_code}")
         content = resp.json()
-        debug(f"list_assets() RESPONSE: {content}")
+#         debug(f"list_assets() RESPONSE: {content}")
         return content
 
     def add_assets(self, assets):
@@ -88,4 +88,12 @@ class AssetManager:
         debug(f"set_active() BODY: {body}")
         resp = httpx.patch(uri, json=body)
         debug(f"set_active() RESPONSE: {resp.status_code}")
+        return 200 <= resp.status_code < 300
+
+    def delete_asset(self, img_or_id):
+        """Removes the specified asset"""
+        img_id = img_or_id if isinstance(img_or_id, str) else img_or_id["asset_id"]
+        uri = f"{self.base_uri}/{img_id}"
+        resp = httpx.delete(uri)
+        debug(f"delete() RESPONSE: {resp.status_code}")
         return 200 <= resp.status_code < 300
