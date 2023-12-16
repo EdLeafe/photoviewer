@@ -22,12 +22,21 @@ class AssetManager:
         self.image_uri = "https://com-leafe-images.nyc3.cdn.digitaloceanspaces.com/photoviewer"
 
     def list_assets(self):
-#         debug(f"list_assets() GET {self.base_uri}")
         resp = httpx.get(self.base_uri)
         debug(f"list_assets() RESPONSE: {resp.status_code}")
         content = resp.json()
-#         debug(f"list_assets() RESPONSE: {content}")
         return content
+
+
+    def set_active_assets(self, images, seconds=30):
+        """Updates the assets to display the passed images"""
+        for asset in self.list_assets():
+            if asset in images:
+                print("It's in!")
+            else:
+                print("Nope!")
+
+
 
     def add_assets(self, assets):
         curr_names = [img["name"] for img in self.list_assets()]

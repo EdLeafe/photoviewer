@@ -140,10 +140,10 @@ class ImageManager(object):
     def start(self):
         if not self.use_anthias:
             self.check_webbrowser()
-        self._set_signals()
-        self.set_timer()
+            self.set_timer()
+            self.show_photo()
         self._started = True
-        self.show_photo()
+        self._set_signals()
         self.main_loop()
 
     def main_loop(self):
@@ -406,7 +406,9 @@ class ImageManager(object):
                     parser.write(ff)
             self.image_list = images
             random.shuffle(self.image_list)
-            self.asset_manger.add_assets(self.image_list)
+            if self.use_anthias:
+                import pudb ; pudb.set_trace()
+                self.asset_manger.set_active_assets(self.image_list, seconds=self.interval)
         else:
             error(resp.status_code, resp.text)
             sys.exit()
