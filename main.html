@@ -22,35 +22,45 @@
   <script type="text/javascript">
     var port = "9001" ;
 
+    function timeString() {
+        // Returns the current time with a trailing space
+        d = new Date();
+        return d.toTimeString().slice(0,9);
+    }
+
+    function logit(msg) {
+        console.log(timeString() + msg);
+    }
+
     function reloadImage() {
       var now = new Date();
       var img = document.getElementById("display");
-      console.log("Reloading; image.src: " + img.src);
+      logit("Reloading; image.src: " + img.src);
       var main_src = img.src.split("?")[0];
       img.src = main_src + "?" + now.getTime();
-      console.log("Reloaded; new image: " + img.src);
+      logit("Reloaded; new image: " + img.src);
       // new timeout: 5 min.
       // setTimeout("reloadImage()", 5 * 60 * 1000);
     }
 
     function reloadFirst() {
-        console.log("First reload");
+        logit("First reload");
         reloadImage();
     }
 
     function reloadSecond() {
-        console.log("Second reload");
+        logit("Second reload");
         reloadImage();
     }
 
     async function setNewImage(url, refresh = false) {
       img = document.getElementById("display");
-      console.log("Current image src = " + img.src);
+      logit("Current image src = " + img.src);
       if (refresh === true && url === img.src) {
-        console.log("Same image; not changing display");
+        logit("Same image; not changing display");
         return;
       }
-      console.log("New src: " + url);
+      logit("New src: " + url);
       img = document.getElementById("display");
       img.src = url;
       if (refresh) {
@@ -58,7 +68,7 @@
         await setNewImage(url, refresh = false) ;
       }
 
-      console.log("Setting reload timeouts");
+      logit("Setting reload timeouts");
       // Force a refresh after 5 seconds, 30 seconds, and 2 minutes
       // setTimeout("reloadFirst()", 5000);
       // setTimeout("reloadSecond()", 30000);
@@ -71,15 +81,14 @@
 
     async function fetchURL() {
       while (true) {
-        console.log("Starting fetch");
+        logit("Starting fetch");
         await fetch("http://localhost:" + port + "/status")
           .then(function(response) {
-            console.log("Response: " + response.text());
             return response.text();
           }
         )
         .then(function(data) {
-          console.log("New URL: " + data);
+          logit("New URL: " + data);
           setNewImage(data);
           }
         );
@@ -91,7 +100,7 @@
         try {
           await fetchURL();
         } catch(err) {
-          console.log("PhotoServer not available; sleeping 5 seconds. Error: " + err);
+          logit("PhotoServer not available; sleeping 5 seconds. Error: " + err);
           await sleep(5000);
         }
       }
