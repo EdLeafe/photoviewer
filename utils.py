@@ -139,7 +139,7 @@ def get_etcd_client():
         status = etcd_client.status()
         debug("Client status OK")
     except etcd_exceptions.ConnectionFailedError as e:
-        error("Couldn't connect to the etcd server")
+        error(f"Couldn't connect to the etcd server: {str(e)}")
         raise EtcdConnectionError
     return etcd_client
 
@@ -198,6 +198,7 @@ def watch(prefix, callback):
 def check_port(port, host="localhost"):
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     result = sock.connect_ex((host, port))
+    debug("Checking port", port, "Result=", result)
     # A result of zero means the port is open
     return result == 0
 

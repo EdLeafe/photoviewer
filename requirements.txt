@@ -1,6 +1,6 @@
 Pillow
 black
-etcd3
+etcd3-fc
 ipython
 pytest-pudb
 requests

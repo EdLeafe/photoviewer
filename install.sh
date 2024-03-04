@@ -11,8 +11,8 @@ cat photo_aliases >> ~/.bash_aliases
 source ~/.bash_aliases
 
 # Copy the autostart file
-sudo mv /etc/xdg/lxsession/LXDE-pi/autostart /etc/xdg/lxsession/LXDE-pi/ORIGautostart
-sudo cp autostart /etc/xdg/lxsession/LXDE-pi/autostart
+# sudo mv /etc/xdg/lxsession/LXDE-pi/autostart /etc/xdg/lxsession/LXDE-pi/ORIGautostart
+# sudo cp autostart /etc/xdg/lxsession/LXDE-pi/autostart
 
 # Copy the service file
 sudo cp photoviewer.service /lib/systemd/system/

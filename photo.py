@@ -76,7 +76,7 @@ def get_log_content(path):
 
 
 def run_webserver(mgr):
-    with socketserver.TCPServer(("", PORT), PhotoHandler) as httpd:
+    with socketserver.TCPServer(("0.0.0.0", PORT), PhotoHandler) as httpd:
         httpd.mgr = mgr
         info("Webserver running on port", PORT)
         httpd.serve_forever()
@@ -138,6 +138,10 @@ class ImageManager(object):
         #        self.check_webbrowser()
         self._set_signals()
         self.set_timer()
+        debug("In start(); checking webserver")
+        while not self.check_webserver():
+            debug("Port not listening; restarting webserver")
+            time.sleep(2)
         self._started = True
         self.show_photo()
         self.main_loop()
@@ -160,6 +164,8 @@ class ImageManager(object):
         t = Thread(target=run_webserver, args=(self,))
         t.start()
         debug("Webserver started")
+        time.sleep(5)
+        self.check_webserver()
 
     def _set_power_on(self):
         # Power on the monitor and HDMI output
@@ -417,8 +423,12 @@ class ImageManager(object):
 
     def check_webserver(self):
         if not utils.check_port(PORT):
+            debug("AAAAHHHHHHH!!!!!!!!")
             info("Webserver port not listening; restarting")
+            time.sleep(3)
             self.start_server()
+            return False
+        return True
 
     def navigate(self, signum=None, forward=True, frame=None):
         """Moves to the next image."""
