@@ -24,34 +24,6 @@ HALFLIFE_FACTOR = 0.67
 PORT = 9001
 
 
-def swapext(pth, ext):
-    """Replaces the extension for the specified path with the supplied
-    extension.
-    """
-    ext = ext.lstrip(".")
-    dirname = os.path.dirname(pth)
-    basename = os.path.basename(pth)
-    newname = f"{os.path.splitext(basename)[0]}.{ext}"
-
-    return os.path.join(dirname, newname)
-
-
-def fb_path(pth):
-    """Given a path to an image file, returns the corresponding path the the
-    frame buffer directory with the same name but with the '.fb' extension.
-    """
-    img_name = os.path.basename(pth)
-    fb_name = swapext(img_name, "fb")
-    return os.path.join(FB_PHOTODIR, fb_name)
-
-
-def clean_fb(pth):
-    """Deletes the frame buffer version of an image if it exists"""
-    fb = fb_path(pth)
-    if os.path.exists(fb):
-        os.unlink(fb)
-
-
 def get_freespace():
     stat = os.statvfs(".")
     freespace = stat.f_frsize * stat.f_bavail
@@ -135,7 +107,6 @@ class ImageManager(object):
         self.start_server()
 
     def start(self):
-        #        self.check_webbrowser()
         self._set_signals()
         self.set_timer()
         debug("In start(); checking webserver")
@@ -209,9 +180,7 @@ class ImageManager(object):
     def _calc_interval(self):
         if self.use_halflife:
             # Check every minute
-            debug(
-                f"Halflife interval of {self.interval} seconds; setting check in 60 seconds"
-            )
+            debug(f"Halflife interval of {self.interval} seconds; setting check in 60 seconds")
             return 60
         else:
             diff = self.interval * (self.variance_pct / 100)
@@ -376,9 +345,7 @@ class ImageManager(object):
         if not self.dl_url:
             error("No download URL configured in photo.cfg; exiting")
             sys.exit()
-        self.interval = utils.normalize_interval(
-            self.interval_time, self.interval_units
-        )
+        self.interval = utils.normalize_interval(self.interval_time, self.interval_units)
         self.set_image_interval()
         self._in_read_config = False
 
@@ -491,7 +458,6 @@ class ImageManager(object):
                 f"halflife={utils.human_time(self.interval)}"
             )
         self._show_start = datetime.datetime.now()
-        #        self.photo_url = self.last_url = urllib.parse.quote_plus(os.path.join(self.dl_url, fname))
         self.photo_url = self.last_url = os.path.join(self.dl_url, fname)
 
     def get_url(self):
@@ -541,9 +507,7 @@ class ImageManager(object):
             with open(CONFIG_FILE, "w") as ff:
                 parser.write(ff)
         if new_interval:
-            self.interval = utils.normalize_interval(
-                self.interval_time, self.interval_units
-            )
+            self.interval = utils.normalize_interval(self.interval_time, self.interval_units)
             info("Setting timer to", self.interval)
             self.set_image_interval()
 
